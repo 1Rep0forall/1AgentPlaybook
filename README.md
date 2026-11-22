@@ -1,42 +1,51 @@
-# 1AgentPlaybook — MES Opening Range Breakout (v1)
+# 1AgentPlaybook — MES Opening Range Breakout (v1.1, draft until frozen)
 
-A rules-based research and execution workflow for a 15-minute Opening Range
+A rules-based research and paper-trading workflow for a 15-minute Opening Range
 Breakout on Micro E-mini S&P 500 futures (MES), built on the
 **One Agent + Playbook + Toolbox + Proof** approach.
 
-> **SIM / paper only.** This is a research framework, not financial advice.
-> Futures are leveraged; losses can exceed planned stops.
+> **Paper trading only.** Nothing here has been tested on real market data yet: the only runs so
+> far used synthetic random-walk data to check the code. This is a research framework, not
+> financial advice. Futures are leveraged; losses can exceed planned stops.
 
 | Part | Path |
 |---|---|
-| Playbook (rules, no-trade, escalation, proof) | `playbook/MES_ORB_Playbook_v1.md` |
-| 10-year backtest blueprint | `playbook/Backtest_Blueprint.md` |
-| Frozen rules (single source of truth) | `toolbox/backtest_config.json` |
-| Trade log template | `toolbox/trade_log_template.csv` |
-| Session checklist | `toolbox/session_checklist.md` |
-| Run registry / notes | `toolbox/backtest_notes.md` |
-| Pre-run decisions (D1–D8) | `toolbox/pre_run_decisions.md` |
+| Agent instructions (daily loop, boundaries) | `CLAUDE.md` |
+| Playbook (rules, no-trade codes, escalation, proof, change process) | `playbook/MES_ORB_Playbook_v1.md` |
+| 10-year backtest blueprint (method, hold-out governance, gates) | `playbook/Backtest_Blueprint.md` |
+| Rules config (frozen once D1–D9 are committed and tagged) | `toolbox/backtest_config.json` |
+| Pre-run decisions D1–D9 | `toolbox/pre_run_decisions.md` |
+| Trade log template / session checklist | `toolbox/trade_log_template.csv`, `toolbox/session_checklist.md` |
+| Run registry, change log, pause reviews | `toolbox/backtest_notes.md` |
 | Backtest engine | `backtest/orb_backtest.py` |
-| Synthetic smoke-test data generator | `backtest/make_synthetic_data.py` |
-| Unit tests (logic + docs/code consistency) | `tests/test_orb_backtest.py` |
+| Session tools: `rules`, `status`, `reconcile` | `backtest/session_tools.py` |
+| Synthetic smoke-test data | `backtest/make_synthetic_data.py` |
+| Tests (logic + docs/config consistency) | `tests/test_orb_backtest.py` |
 
 ## Quick start
 ```bash
-pip install pandas numpy            # matplotlib optional (equity chart)
-# 0) unit tests
+pip install pandas numpy pytest     # matplotlib optional (equity chart)
 python -m pytest tests/ -q
-# 1) smoke test the pipeline (results are meaningless; this quiet set actually trades at $25)
-python backtest/make_synthetic_data.py --daily-vol 0.0012 --out data/synthetic_quiet.csv
-python backtest/orb_backtest.py --data data/synthetic_quiet.csv --config toolbox/backtest_config.json
-# 2) real data (example: naive Central-Time 1-min ES bars stamped at bar start)
-python backtest/orb_backtest.py --data data/es_1min.csv --data-tz America/Chicago \
-    --bar-label start --config toolbox/backtest_config.json --out results
+python backtest/session_tools.py rules
 ```
+Smoke test (synthetic data, 2016–2017, inside the dev period; results mean nothing):
+```bash
+python backtest/make_synthetic_data.py --daily-vol 0.0012 --out data/synthetic_quiet.csv
+python backtest/orb_backtest.py --period dev --data data/synthetic_quiet.csv --out /tmp/orb_smoke
+```
+Real data (after D1–D9 are committed and tagged; example: naive Central-Time 1-min ES bars stamped at bar start):
+```bash
+python backtest/orb_backtest.py --period dev --data data/es_1min.csv --data-tz America/Chicago --bar-label start --config toolbox/backtest_config.json
+```
+`--period holdout` is a **one-time** run (Blueprint §2.3) and is refused on an uncommitted worktree.
 See the docstring at the top of `backtest/orb_backtest.py` for the input CSV format.
 
-## The biggest assumption to review first
-The stop sits at the opposite side of the opening range, so dollar risk is at
-least the full OR width. Under a $25 cap (after $2 fees and 2 ticks of slippage), only
-opening ranges of about **3.75 points or less** qualify. At current index levels
-most sessions will be no-trade days. Check `or_width_pts` in `day_log.csv`
-before you interpret any result. See Playbook §0 for the full assumption list.
+## What git tracks
+`logs/` (paper-trading proof) and `results/` (backtest outputs) are committed; that is the proof.
+Only raw market data in `data/` is ignored.
+
+## The biggest thing to understand first
+The stop sits at the opposite side of the opening range, so dollar risk is at least the full
+range width. Under a $25 cap (after $2 fees and 3 ticks of breakout + slippage), only opening
+ranges of about **3.75 points or less** qualify. Most sessions will be no-trade days, and a low
+trade count may make the 10-year result **inconclusive**. That is an honest outcome, not a bug.

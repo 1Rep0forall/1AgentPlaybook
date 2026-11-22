@@ -15,6 +15,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backtest"))
 import orb_backtest as ob  # noqa: E402
+import session_tools as st  # noqa: E402
 
 CFG = ob.Config()
 
@@ -89,14 +90,6 @@ def test_capped_limit_never_fills_worse_than_limit():
     r = sim(rows)
     assert r["traded"] and r["entry_price"] == 4004.25      # slippage capped at the limit
     assert r["risk_usd"] <= CFG.max_risk_usd
-
-
-def test_market_bail_charges_round_trip_costs():
-    rows = long_breakout(width=3.0, close_above=1.5, rest=flat("09:50", "12:05", 4004.5))
-    r = sim(rows, entry_mode="market_bail")
-    assert r["traded"] and r["exit_reason"] == "risk_cap_bailout"
-    # 1 tick in + 1 tick out = $2.50 slippage, $2 commission
-    assert r["net_usd"] == -4.5 and r["slippage_usd"] == 2.5
 
 
 # ---------------------------------------------------------------- exits
@@ -236,7 +229,7 @@ def test_costs_x2_same_trades_keeps_trade_count():
 # ---------------------------------------------------------------- docs stay in sync with code
 def test_playbook_lists_every_reason_code():
     text = (ROOT / "playbook" / "MES_ORB_Playbook_v1.md").read_text()
-    missing = [c for c in ob.REASON_CODES if f"`{c}`" not in text]
+    missing = [c for c in {**ob.REASON_CODES, **ob.LIVE_ONLY_REASON_CODES} if f"`{c}`" not in text]
     assert not missing, f"playbook no-trade table is missing {missing}"
 
 
@@ -246,25 +239,109 @@ def test_trade_log_template_has_shared_columns():
     assert not missing, f"trade_log_template.csv is missing {missing}"
 
 
-def test_frozen_config_loads_and_matches_documented_values():
+def test_config_loads_and_version_is_labelled():
     cfg = ob.load_config(str(ROOT / "toolbox" / "backtest_config.json"))
-    assert cfg.max_risk_usd == 25.0 and cfg.entry_mode == "capped_limit" and cfg.min_or_coverage == 1.0
+    assert cfg.max_risk_usd == 25.0 and cfg.dev_end < cfg.holdout_start
     raw = json.loads((ROOT / "toolbox" / "backtest_config.json").read_text())
     assert re.match(r"v1\.1", raw["_version"])
 
 
-# ---------------------------------------------------------------- end to end
-def test_end_to_end_smoke(tmp_path):
+def test_docs_quote_the_numbers_derived_from_config():
+    """Root-cause guard: if the cap, fees or slippage change, the playbook and
+    checklist numbers must be updated in the same commit."""
+    cfg = ob.load_config(str(ROOT / "toolbox" / "backtest_config.json"))
+    n = ob.derived_numbers(cfg)
+    assert (n["limit_offset_pts"], n["max_or_width_pts"], n["precheck_extra_pts"]) == (4.25, 3.75, 0.75)
+    for doc in ("playbook/MES_ORB_Playbook_v1.md", "toolbox/session_checklist.md"):
+        text = (ROOT / doc).read_text()
+        for needle in (f"OR Low + {n['limit_offset_pts']}", f"OR High − {n['limit_offset_pts']}",
+                       f"(width + {n['precheck_extra_pts']})"):
+            assert needle in text, f"{doc} does not quote '{needle}' (derived from config)"
+
+
+# ---------------------------------------------------------------- hold-out governance
+def test_period_selection_is_a_hard_wall():
+    bars = bars_frame({"2021-12-31": long_breakout(2.0), "2022-01-03": long_breakout(2.0)})
+    assert set(ob.select_period(bars, CFG, "dev")["date"].astype(str)) == {"2021-12-31"}
+    assert set(ob.select_period(bars, CFG, "holdout")["date"].astype(str)) == {"2022-01-03"}
+
+
+def five_day_csv(tmp_path, start):
     rows = []
-    for d in pd.bdate_range("2024-01-02", periods=5):
+    for d in pd.bdate_range(start, periods=5):
         for tm, o, h, l, c in long_breakout(2.0):
             rows.append((f"{d:%Y-%m-%d}T{tm}:00-05:00", o, h, l, c))
-    p = write_csv(tmp_path, rows)
-    out = ob.main(["--data", str(p), "--out", str(tmp_path / "res")])
+    return write_csv(tmp_path, rows)
+
+
+def test_period_flag_is_required(tmp_path):
+    with pytest.raises(SystemExit):
+        ob.main(["--data", str(five_day_csv(tmp_path, "2016-01-04")), "--out", str(tmp_path / "res")])
+
+
+def test_holdout_refused_on_dirty_worktree(tmp_path, monkeypatch):
+    monkeypatch.setattr(ob, "git_info", lambda _: {"git_commit": "abc", "git_worktree_dirty": True})
+    with pytest.raises(SystemExit, match="clean git worktree"):
+        ob.main(["--period", "holdout", "--data", str(five_day_csv(tmp_path, "2024-01-02")),
+                 "--out", str(tmp_path / "res")])
+
+
+# ---------------------------------------------------------------- session tools
+def log_frame(rows):
+    cols = (ROOT / "toolbox" / "trade_log_template.csv").read_text().splitlines()[0].split(",")
+    df = pd.DataFrame([{c: "" for c in cols} | r for r in rows])
+    return df.astype(str)
+
+
+def traded_row(date, net, violation="N"):
+    return {"date": date, "mode": "SIM", "traded": "True", "entry_price": "4002.5", "stop_price": "4000",
+            "exit_price": "4000", "exit_reason": "stop", "net_usd": str(net), "rule_violation": violation,
+            "chart_screenshot_path": "logs/charts/x.png"}
+
+
+def test_status_escalates_on_drawdown_and_flags_missing_proof():
+    rows = [traded_row(f"2026-01-{d:02d}", -25) for d in range(5, 9)]          # -$100 -> pause
+    s = st.status(log_frame(rows), CFG)
+    assert s["verdict"] == "PAUSE" and s["current_losing_streak"] == 4 and s["drawdown_usd"] == 100
+    rows += [traded_row("2026-01-09", -25), traded_row("2026-01-12", -25)]   # -$150 -> stop
+    assert st.status(log_frame(rows), CFG)["verdict"] == "STOP"
+    gap = [{"date": "2026-01-05", "mode": "SIM", "traded": "False", "no_trade_reason": "made_up_code",
+            "rule_violation": "N"}]
+    s = st.status(log_frame(gap), CFG)
+    assert s["verdict"] == "FIX-PROOF" and "no_trade_reason" in s["proof_gaps"][0]
+
+
+def test_status_go_and_no_trade_streak():
+    rows = [{"date": f"2026-01-0{d}", "mode": "SIM", "traded": "False",
+             "no_trade_reason": "or_too_wide_for_risk_cap", "rule_violation": "N"} for d in range(5, 9)]
+    s = st.status(log_frame(rows), CFG)
+    assert s["verdict"] == "GO" and s["current_no_trade_streak"] == 4
+
+
+def test_reconcile_classifies_differences():
+    model = sim(long_breakout(width=2.0))                        # time-exit trade
+    logged = pd.Series({k: str(v) for k, v in model.items()})
+    assert st.reconcile(model, logged, CFG)["verdict"] == "MATCH"
+    worse = logged.copy()
+    worse["entry_price"] = str(model["entry_price"] + 0.75)
+    assert st.reconcile(model, worse, CFG)["verdict"] == "FILL_DIFF"
+    stood_aside = pd.Series({"traded": "False", "no_trade_reason": "no_breakout"})
+    assert st.reconcile(model, stood_aside, CFG)["verdict"] == "DECISION_MISMATCH"
+
+
+def test_rules_output_matches_derived_numbers():
+    r = st.rules(CFG)
+    assert r["long_limit"] == "OR Low + 4.25" and r["max_or_width_pts"] == 3.75
+
+
+# ---------------------------------------------------------------- end to end
+def test_end_to_end_smoke(tmp_path):
+    p = five_day_csv(tmp_path, "2016-01-04")
+    out = ob.main(["--period", "dev", "--data", str(p), "--out", str(tmp_path / "res")])
     for f in ("trade_log.csv", "day_log.csv", "summary.json", "run_manifest.json",
               "by_year.csv", "by_regime.csv", "sensitivity.csv", "equity_curve.csv"):
         assert (out / f).exists(), f
     man = json.loads((out / "run_manifest.json").read_text())
-    assert man["script_sha256"] and "git_commit" in man
+    assert man["script_sha256"] and "git_commit" in man and man["period"] == "dev"
     summ = json.loads((out / "summary.json").read_text())
     assert summ["trades"] == 5 and summ["warnings"]

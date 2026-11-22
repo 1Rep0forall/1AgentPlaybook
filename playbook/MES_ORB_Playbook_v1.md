@@ -1,74 +1,66 @@
-# MES ORB Playbook — v1.1
+# MES ORB Playbook — v1.1 (draft until frozen)
 
-> **One Agent + Playbook + Toolbox + Proof.** The agent (you, or an AI assistant)
-> runs the *same* playbook every session, uses the *same* tools, and does not call
-> anything "done" without the *same* proof. Rules change only by creating v1.1, v2, etc.
+> **One Agent + Playbook + Toolbox + Proof.** One agent (you, helped by an AI assistant following
+> `CLAUDE.md`) runs the *same* playbook every session, uses the *same* tools, and calls nothing
+> "done" without the *same* proof. Rules change only through §5.
 
-**Status:** SIM / paper only. No live capital until the graduation criteria (§6) are met.
-**Rules source of truth:** `toolbox/backtest_config.json` (the backtest and live rules must match).
-
-**v1.1 changes (2026-11-22, before any real-data run, so no hold-out has been used):** entry is now a
-*risk-capped limit order* instead of "market, then exit if risk is too big" (the backtest could not
-model the bail-out costs honestly); the 09:45 pre-check includes the one-tick breakout; all 15
-opening-range bars are required; reason codes are unified between this playbook and the backtest.
-
----
-
-## 0. Assumptions to review before using this
-
-| # | Assumption | Why it matters | Default in v1 |
-|---|---|---|---|
-| A1 | **$25 risk cap vs. real opening-range width** | Stop = opposite OR boundary, so risk ≥ the full OR width. With $2 RT fees + 2 ticks slippage, $25 allows an OR of only **≈3.75 points** (the breakout close must be at least 1 tick beyond the range). The 15-min MES opening range is often far wider at current index levels, so **most days will be no-trade days**, and trade frequency falls as the index level rises. Measure it in `day_log.csv` (`or_width_pts`) before you draw conclusions. | Keep it. Treat a low trade count as a real finding, not a bug. |
-| A2 | **$50 daily loss limit is mostly redundant** | With 1 trade/day and a $25 cap, you can only hit −$50 through a gap through the stop or a broken rule. The backtest reports any breach. | Keep it as a hard backstop. |
-| A3 | **$500 account vs. margin** | Broker day-trade margin for MES varies widely and can change without notice. Exchange (overnight) margin is far above $500, so you **must be flat before the close**. One full loss is about 5% of the account, and a 10-loss streak is about 50%. | Confirm your broker's intraday margin and auto-liquidation level. |
-| A4 | **MES has only existed since May 2019** | A 10-year test needs ES data as a proxy for 2015–2019. Points are identical, but fills and liquidity differ slightly. | ES 1-min data, $5/pt applied. |
-| A5 | **What "first completed bar" means, and the entry order** | Not specified in the brief. | Signal = first **5-min** bar that *closes* outside the OR. Entry = **limit order at the risk-capped price** (§2 step 4), modeled as a fill at the next bar's open + 1 tick, never worse than the limit. |
-| A6 | **Time-exit cutoff** | Not specified in the brief. | **12:00 ET**. Entries close at 11:00, so every trade has at least an hour to work. |
-| A7 | **Target** | You named 1.5R or 2R. Testing both and picking the winner is curve-fitting. | **1.5R primary**, 2R reported as a pre-declared alternate only. |
-| A8 | **Costs** | Commission + exchange + NFA fees vary by broker. | $1.00/side/contract; 1 tick slippage on entry, stop and time exits; target is a limit order that fills only if price trades 1 tick *through* it. |
-| A9 | **News/event days** | Filtering news days after you've seen the results is curve-fitting. | v1 trades them; tag them in the log (FOMC, CPI, NFP) for later analysis. |
-| A10 | **Costs eat a big share of a small stop** | About $4.50 of fees + slippage on a $13–25 risk. A full 1.5R target nets only **≈1.0–1.2R** after costs, so the break-even win rate is **≈45–50%**. | Nothing to set; know it when you read the results. |
+**Status:** paper (SIM) only. No live capital until §6 is met.
+**Not yet frozen:** the rules become v1.1-frozen when `toolbox/pre_run_decisions.md` is filled in,
+committed and tagged `v1.1-frozen`. Until then, this is a draft.
+**Numbers come from config:** every number below is derived from `toolbox/backtest_config.json`.
+Print today's values with `python backtest/session_tools.py rules`; a test fails if this page and
+the config disagree.
 
 ---
 
-## 1. Trigger & session window (all times US/Eastern)
+## 0. What to expect (read once)
+
+| # | Fact | What it means for you |
+|---|---|---|
+| A1 | The stop sits at the far side of the opening range, so risk ≥ the whole range. A $25 cap admits ranges of **≤ 3.75 points** only. | **Most days will be no-trade days**, more so as the index level rises. That is the rule working, not a problem to fix. |
+| A2 | Fees + slippage are ≈ $4.50 a trade on a $13–25 risk. A full 1.5R target nets **≈ 1.0–1.2R** after costs. | You need to win **≈ 45–50%** of trades just to break even. |
+| A3 | One full loss ≈ 5% of $500; six in a row ≈ 30%. Streaks of 6+ losses are *likely* over 100 trades even for a profitable strategy. | Drawdowns are normal. The escalation rules (§2.3) decide what you do, not your mood. |
+| A4 | MES exists only since May 2019; the 10-year test uses ES prices as a stand-in. | Pre-2019 fills may be slightly optimistic. |
+| A5 | Paper platforms usually fill limit orders on a *touch* and stops *without* slippage. The backtest does neither. | Paper P&L will look better than the backtest. Compare **decisions** with `reconcile`, not dollars. |
+| A6 | News days are traded (and tagged). | Filtering them after seeing results would be curve-fitting. |
+
+---
+
+## 1. Session window (all times US/Eastern)
 
 | Time (ET) | Phase | Action |
 |---|---|---|
-| 09:00–09:29 | Pre-session | Run the **Session Checklist** (`toolbox/session_checklist.md`). Confirm platform, data, account, playbook version. |
-| 09:30:00–09:44:59 | Opening range | Record the **OR High** and **OR Low** from the 15 one-minute bars. No orders. |
-| 09:45 | OR lock | Compute `OR width`, then `est. risk $ = (width + 0.75) × $5 + $2`. If it is over $25, **no trade today**. Log it and stop. Otherwise compute both **limit prices**: long `OR Low + 4.25`, short `OR High − 4.25` (§2 step 4). |
-| 09:45–11:00 | Entry window | **Trigger:** first completed **5-min bar** that closes **above OR High** (long) or **below OR Low** (short). |
-| ≤11:00 | Last signal | A signal bar must *close* by 11:00. No new entries after that. |
+| 09:00–09:29 | Pre-session | Session checklist. `session_tools.py status` must say **GO**. |
+| 09:30:00–09:44:59 | Opening range | Record **OR High** and **OR Low** from the 15 one-minute bars. No orders. |
+| 09:45 | OR lock | `est. risk $ = (width + 0.75) × $5 + $2`. Over $25 → **no trade today**. Under 1.0 pt wide → no trade. Otherwise write down both limit prices: long `OR Low + 4.25`, short `OR High − 4.25`. |
+| 09:45–11:00 | Entry window | **Trigger:** first completed **5-min bar** that closes **above OR High** (long) or **below OR Low** (short). Wicks don't count. |
+| ≤ 11:00 | Last signal | The signal bar must *close* by 11:00. |
 | 12:00 | Time exit | Flatten any open position at market. |
 
-**One trade per session, maximum.** The first valid signal is the only signal. If it is skipped (for example, the limit order isn't filled), the session is over. You do not wait for a "better" second breakout.
+**One trade per session, maximum.** The first signal is the only signal. If it doesn't fill, the
+session is over. You never wait for a "better" second breakout.
 
 ---
 
-## 2. Step-by-step execution
+## 2. Execution
 
-1. **Lock the range (09:45).** Write OR High, OR Low and width into the trade log.
-2. **Pre-check risk.** If the estimated risk is over $25 → `no_trade_reason = or_too_wide_for_risk_cap`. If the width is under 1.0 pt → `or_too_narrow`. Done for the day.
-3. **Wait for a 5-min close outside the range.** Do not anticipate. Wicks don't count; only the close does.
-4. **Enter** 1 MES with a **limit order at the risk-capped price** immediately after the signal bar closes.
-   - Limit distance from the stop = `($25 − $2 fees) / $5 − 0.25` = 4.35 pts, rounded **down** to a tick = **4.25 pts**.
-   - Long: limit = `OR Low + 4.25`. Short: limit = `OR High − 4.25`. (Recompute if you change the cap or fees.)
-   - The limit guarantees you can't be filled at a price where risk exceeds $25.
-5. **If not filled by the end of the next 1-minute bar, cancel.** Log `entry_limit_not_filled`, done for the day.
-   *(The backtest fills only if the next bar opens at or inside the limit, a slightly pessimistic model.)*
-6. **Place a bracket (OCO) immediately:**
-   - Stop: the opposite OR boundary (long → OR Low, short → OR High).
-   - Target: `entry ± 1.5 × |entry − stop|`, rounded to a tick *away* from entry.
-7. **Hands off.** No moving the stop, no adding, no early exit, except for the escalation rules below.
-8. **12:00 ET:** if still open, flatten at market.
-9. **Log and close out** (§4 Proof).
+### 2.1 Steps
 
-### 2.1 No-trade / stand-aside rules (log the reason every time)
+1. **09:45 — lock the range** and run the pre-check above. Log the result.
+2. **Wait** for a 5-min close outside the range. Do not anticipate.
+3. **Send one order: a limit entry at the risk-capped price with the stop attached** (a bracket/OCO
+   or "attached stop" order, if your platform supports it). Long limit `OR Low + 4.25`, short limit
+   `OR High − 4.25`; stop at the opposite range boundary. The limit makes a fill beyond the $25
+   risk impossible; the attached stop means you are never in a position without protection.
+4. **Not filled by the end of the next 1-minute bar → cancel.** Log `entry_limit_not_filled`. Done.
+5. **Filled →** set the target at `fill ± 1.5 × |fill − stop|`, rounded to a tick *away* from the fill.
+6. **Hands off.** No moving the stop or target, no adding, no early exit (except §2.3 incidents).
+7. **12:00 →** flatten at market if still open.
+8. **Close out** with the Proof in §4.1.
 
-| Code | Condition |
-|---|---|
-The same codes appear in the backtest's `day_log.csv` (a test keeps this table and the code in sync).
+### 2.2 No-trade reason codes (log one every no-trade day)
+
+The backtest emits the same codes in `day_log.csv`; a test keeps this table and the code in sync.
 
 | Code | Condition | Where |
 |---|---|---|
@@ -83,107 +75,102 @@ The same codes appear in the backtest's `day_log.csv` (a test keeps this table a
 | `no_session_data` | Exchange holiday or missing data for a weekday | both |
 | `contract_roll_in_session` | Data mixes two contract months within the session | backtest |
 | `daily_loss_limit` | Day P&L ≤ −$50 (hard stop for the day) | live/paper only |
-| `not_ready` | Pre-session checklist not fully green | live/paper only |
+| `not_ready` | Checklist not fully green, or `status` was not GO | live/paper only |
 
-A no-trade day is a **successful** day if the rules were followed. It still gets logged.
+**A no-trade day where you followed the rules is a successful day.** Long no-trade streaks are
+expected (A1). They are never a reason to loosen a rule, take a "nearly valid" setup, or trade a
+second signal. Compare your no-trade rate with the backtest's `trade_rate` instead.
 
-### 2.2 Escalation (stop, flatten, review)
+### 2.3 Escalation — applied mechanically by `session_tools.py status`
 
 | Trigger | Action |
 |---|---|
-| Platform, data or connectivity problem with a position open | Flatten immediately. Log `incident`. No more trades today. |
-| Any rule violation (late entry, moved stop, second trade, oversized) | Log `rule_violation = Y`. The next 5 sessions are SIM only, even if you are live. |
-| Account drawdown ≥ $100 (20%) | Pause. Compare the live-trade distribution with backtest `summary.json`. Resume only if it is within the Monte Carlo p95. |
-| Account drawdown ≥ $150 (30%) | **Stop trading v1.** Return to research. A restart needs a new version and new proof. |
-| Losing streak longer than backtest `losing_streak_p95` | Same as the $150 rule: the live edge may differ from the test. |
-| Any single loss > $50 | Investigate the fill or slippage. Check the broker/order type before the next session. |
+| Platform, data or connection problem with a position open | Flatten immediately; note `incident` in `notes`; no more trades today. |
+| Any rule violation (late entry, moved stop, second trade, oversized) | `rule_violation = Y`. Next 5 sessions are SIM only, even if you are live. |
+| Drawdown ≥ `drawdown_pause_usd` ($100) | **PAUSE**: no trading until you have run `reconcile` on every losing trade and written a review in `backtest_notes.md`. Resume only if every loss was a valid playbook trade. |
+| Drawdown ≥ `drawdown_stop_usd` ($150) | **STOP** v1. Back to research. Restarting needs a new version (§5) and new proof. |
+| Any single loss > $50 | Investigate the fill. Check order type and broker settings before the next session. |
+| Proof missing for an earlier session | **FIX-PROOF**: complete it before trading again. |
 
-> **Decision pending (D6):** $150 = 6 full losses. In a simulation, a strategy losing 55–60% of trades
-> has a **73–88%** chance of a 6-loss streak somewhere in 100 trades, even if it is profitable. So the
-> fixed $150 stop is likely to fire on ordinary noise. Before the first real run, choose: keep it, or
-> replace it with "drawdown beyond the backtest's Monte Carlo `max_dd_usd_p95`".
+The $150 stop is a pending choice (D6 in `toolbox/pre_run_decisions.md`), because it is likely to
+trigger on ordinary losing streaks (A3).
+
+### 2.4 Account and broker realism (small account)
+
+- **Broker controls first:** if your platform supports them, set *max position size = 1 contract*
+  and a *daily loss limit = $50*. A platform limit works even when you don't.
+- **Margin:** confirm in writing your broker's minimum account balance, MES day-trade margin and
+  auto-liquidation level. If equity falls below `minimum + $100`, trade SIM only.
+- **Be flat by 12:00 ET.** The exit is long before the close, so overnight margin never applies, but
+  know your broker's own intraday-margin cut-off and never rely on it.
+- **Paper ≠ live fills (A5).** Record what the platform did; `reconcile` shows what the model
+  expects. Keep a running count of decision mismatches caused by paper fills on touch.
 
 ---
 
-## 3. Toolbox (built once, reused every time)
+## 3. Toolbox (built once, reused every session)
 
-| Tool | File | How it is reused (not rebuilt) |
+| Tool | File | Use |
 |---|---|---|
-| **Trade log** | `toolbox/trade_log_template.csv` | Copy once to `logs/trade_log_<year>.csv`. Add **one row per session**, including no-trade days. It uses the **same column names** as the backtest's `day_log.csv`/`trade_log.csv` (a test checks this), plus live-only columns (`mode`, `rule_violation`, order IDs, screenshot path). |
-| **Session checklist** | `toolbox/session_checklist.md` | The same checklist every day. Copy it to `logs/sessions/YYYY-MM-DD.md` and tick the boxes. You never re-think the routine. |
-| **Backtest config** | `toolbox/backtest_config.json` | The **single source of truth** for the rules. The backtest script reads it, and the playbook mirrors it. To test a variant, copy it to e.g. `backtest_config_v1.2.json`. Never edit a frozen version in place. |
-| **Backtest notes / run registry** | `toolbox/backtest_notes.md` | Add one entry per run: run ID, config hash, data hash, hypothesis, result, decision. This also counts how many variants you have tried, which is your curve-fitting budget. |
-| **Backtest engine** | `backtest/orb_backtest.py` | The same script for every test. Only config and data change. |
-| **Smoke-test data** | `backtest/make_synthetic_data.py` | Confirms the pipeline works after any code change (`--daily-vol 0.0012` gives a set that actually trades at $25). Its results mean nothing about the market. |
-| **Unit tests** | `tests/test_orb_backtest.py` | Run `python -m pytest tests/` after **any** code or rule change. Hand-built sessions with known answers, plus checks that this playbook, the template and the config agree with the code. |
+| **Agent instructions** | `CLAUDE.md` | The one agent's operating loop and boundaries. |
+| **Rules / config** | `toolbox/backtest_config.json` | Every rule number. Never edit a frozen version; copy it to a new version (§5). |
+| **Session tools** | `backtest/session_tools.py` | `rules` (today's numbers), `status` (GO/PAUSE/STOP/FIX-PROOF), `reconcile` (your log vs. the model for one session). |
+| **Trade log** | `toolbox/trade_log_template.csv` | Copy once to `logs/trade_log_<year>.csv`; one row per session, incl. no-trade days. Same column names as the backtest. |
+| **Session checklist** | `toolbox/session_checklist.md` | Copy to `logs/sessions/YYYY-MM-DD.md` each day and tick it. |
+| **Decisions** | `toolbox/pre_run_decisions.md` | D1–D9, made once before the first real run. |
+| **Run registry** | `toolbox/backtest_notes.md` | Every backtest run and every playbook change, with a reason. |
+| **Backtest engine** | `backtest/orb_backtest.py` | Same script for every test; only config and data change. `--period dev|holdout` is required. |
+| **Tests** | `tests/test_orb_backtest.py` | `python -m pytest tests/ -q` after any change. Includes checks that docs, template and config agree with the code. |
+
+`logs/` and `results/` are **committed to git**: proof that only exists on one laptop is not proof.
+Only raw market data (`data/`) is ignored.
 
 ---
 
-## 4. Proof of completion ("Done" checklists)
+## 4. Proof ("done" means all boxes ticked)
 
 ### 4.1 Session is DONE when…
 
-**Numbers / metrics**
-- [ ] OR High, OR Low, width and estimated $ risk recorded
-- [ ] Decision recorded: `TRADE` or `NO-TRADE` plus the reason code
-- [ ] If traded: entry, stop, target, exit, exit reason, net $ after fees, R-multiple
-- [ ] Day P&L and running account equity updated
-
-**Links / file paths / IDs**
-- [ ] Row added to `logs/trade_log_<year>.csv` with `playbook_version = v1.1`
-- [ ] `logs/sessions/YYYY-MM-DD.md` checklist saved
-- [ ] Broker/SIM order IDs (or the platform export file) recorded in `notes`
-
-**Visual / chart check**
-- [ ] Screenshot saved (`logs/charts/YYYY-MM-DD.png`) showing OR lines, the signal bar, entry, stop, target and exit
-- [ ] The screenshot agrees with the logged prices (spot-check one level)
-
-**Validation / rule checks**
-- [ ] At most 1 trade; entry time within 09:45–11:00 ET; flat by 12:00
-- [ ] Entry by limit order at or inside the risk-capped price; stop at the OR boundary; stop/target not moved
-- [ ] `rule_violation` = N (if Y, escalation §2.2 applied)
+- [ ] Log row complete: range, decision + reason code, and if traded: entry, stop, target, exit, exit reason, net $, R
+- [ ] `rule_violation` filled in (Y/N); if Y, §2.3 applied
+- [ ] Chart screenshot `logs/charts/YYYY-MM-DD.png` shows range lines, signal bar, entry, stop, target, exit
+- [ ] `session_tools.py reconcile` run on the session's 1-min bars; verdict written to `reconcile_verdict`, model P&L to `model_net_usd`
+- [ ] Any `DECISION_MISMATCH` explained in `notes` as one of: rule violation / data difference / paper-fill difference / rule ambiguity (→ §5)
+- [ ] `session_tools.py status` re-run; verdict noted for tomorrow
+- [ ] Log, checklist and screenshot committed
 
 ### 4.2 Backtest run is DONE when…
 
-**Numbers / metrics** (from `summary.json`, `by_year.csv`, `by_regime.csv`, `sensitivity.csv`)
-- [ ] Sessions, trades, trade rate, and no-trade counts by reason
-- [ ] Net P&L **after costs**, win rate, profit factor, expectancy ($ and R)
-- [ ] Max drawdown in $ and as % of $500; lowest equity; longest losing streak
-- [ ] Monte Carlo p95 drawdown and p95 losing streak
-- [ ] Year-by-year and regime tables reviewed; no single year produces more than 50% of the profit
-- [ ] Sensitivity: `costs_x2_same_trades`, `costs_x2_reselected` and the opposite ambiguity rule recorded
-
-**Links / file paths / IDs**
-- [ ] `run_id` (contains config hash + data hash) recorded in `toolbox/backtest_notes.md`
-- [ ] `run_manifest.json` stored with the results; `git_commit` present and `git_worktree_dirty = false`; data file and vendor noted
-- [ ] `python -m pytest tests/` passed on that commit
-
-**Visual / chart check**
-- [ ] Equity and drawdown chart reviewed (`equity_drawdown.png`, or plot `equity_curve.csv`)
-- [ ] At least **10 random trades** (`trade_log.csv`) checked by hand against a chart: OR levels, signal bar, fill, exit
-- [ ] At least 5 no-trade days checked (the reason is correct)
-
-**Validation / rule checks**
-- [ ] Data hygiene report reviewed (duplicates incl. conflicting ones, bad OHLC, off-grid prices, session count about 252/year, `weekdays_without_data` ≈ holidays)
-- [ ] Timezone check: `open_alignment.months_flagged = 0` in `run_manifest.json`, **and** a manual look at a DST-change week (March and November)
-- [ ] Rolls: `symbol` column supplied and `sessions_with_multiple_symbols` explained (or 0)
-- [ ] `summary.json` → `warnings` read and each one resolved or accepted in `backtest_notes.md`
-- [ ] `ambiguous_bar_share` reported; the conclusion does not flip between stop-first and target-first
-- [ ] No parameter changed after seeing out-of-sample results (blueprint §2.3)
+- [ ] Run made from a committed state (`git_worktree_dirty = false` in `run_manifest.json`); tests passed on that commit
+- [ ] `run_id` and the key numbers recorded in `toolbox/backtest_notes.md`
+- [ ] `summary.json → warnings` each resolved or accepted in writing
+- [ ] Data checks: `open_alignment.months_flagged = 0`, `sessions_with_multiple_symbols` explained, `weekdays_without_data` ≈ holidays
+- [ ] 10 random trades and 5 no-trade days checked by hand against a chart
+- [ ] Verdict written against Blueprint §4 gates: **PASS / FAIL / INCONCLUSIVE**
+- [ ] Results folder committed
 
 ---
 
-## 5. Version control of the playbook
+## 5. Changing the playbook (how edge cases become fixes, not chat patches)
 
-- v1.0 = first commit. v1.1 = this document + `toolbox/backtest_config.json` as committed (audit fixes, before any real-data run).
-- Any further change, including "just" the exit time, becomes **v1.2**: a new config file, a new backtest run, a notes entry with a reason, and a re-run of the hold-out **only if it has not been used before**.
+Every discovered edge case is classified **before** anything is edited:
 
-## 6. SIM → live graduation criteria (all required)
+| Type | Example | What you do |
+|---|---|---|
+| **Clarification** — no trade decision or price changes | Wording is ambiguous, a checklist step is missing | Edit the docs, add a test if possible, note it in `backtest_notes.md`. Version stays v1.1. |
+| **Bug fix** — the code doesn't do what the written rule says | Backtest fills a limit the rule says can't fill | Write a failing test first, fix the code, re-run **dev only**. Blueprint §2.3 says when the hold-out may be re-run. |
+| **Rule change** — any trade decision or price would change | New exit time, different cap, a filter | New version (v1.2): new config, dev re-run, **forward paper validation from zero**. Not while PAUSE/STOP is active. At most one rule change per calendar month. |
 
-1. Backtest passed the blueprint gates (Blueprint §4).
-2. At least 40 SIM sessions logged with **zero** rule violations, and at least 15 SIM trades. *(Decision pending D7: if the measured trade rate is very low, 15 trades could take a year; decide count- vs. time-based after the first real run.)*
-3. SIM fills within the modeled slippage (average ≤ 1 tick on entry and stop).
-4. Broker intraday margin, auto-liquidation level and fee schedule confirmed in writing.
-5. Written acceptance: *"I accept that a normal losing streak can cost $___ (Monte Carlo p95) and I will not change rules mid-streak."*
+Never change a rule in the middle of a session, a losing streak, or a conversation about a single trade.
 
-> **Risk disclosure:** futures are leveraged. Losses can exceed a planned stop (gaps, outages, fast markets). Past and simulated results do not guarantee future results. This playbook is a research and process framework, not financial advice.
+## 6. Paper → live (all required)
+
+1. Backtest verdict **PASS** (Blueprint §4). **INCONCLUSIVE or FAIL never goes live**: keep paper trading as data collection, or stop.
+2. ≥ 40 paper sessions with **zero** rule violations, and the paper-trade count chosen in D7.
+3. `reconcile`: no unexplained `DECISION_MISMATCH`; entry/exit price differences average ≤ 1 tick against the model.
+4. Broker margin, minimum balance, auto-liquidation level and fees confirmed in writing; platform risk limits set (§2.4).
+5. Written: *"A normal losing streak can cost $___ (backtest Monte Carlo p95 drawdown). I will not change rules mid-streak."*
+
+> **Risk disclosure:** futures are leveraged. Losses can exceed a planned stop (gaps, outages,
+> fast markets). Past and simulated results do not guarantee future results. This is a research
+> and process framework, not financial advice.

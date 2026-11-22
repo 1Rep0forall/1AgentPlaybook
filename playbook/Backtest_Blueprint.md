@@ -1,8 +1,9 @@
 # 10-Year Backtest Blueprint — MES ORB v1.1
 
-Goal: find out whether the **frozen v1 rules** had a positive expectancy after
+Goal: find out whether the **frozen v1.1 rules** had a positive expectancy after
 realistic costs across 10 years and different regimes. The goal is not to find
-the best parameters.
+the best parameters. Possible verdicts: **PASS**, **FAIL** or **INCONCLUSIVE**.
+All three are useful results.
 
 ---
 
@@ -46,31 +47,54 @@ the best parameters.
 ## 2. Fixed rules before testing (anti-curve-fitting)
 
 ### 2.1 Freeze
-All rules live in `toolbox/backtest_config.json` (currently v1.1) and are committed **before** the first real-data run. The commit hash is your pre-registration.
+All rules live in `toolbox/backtest_config.json`. Before the first real-data run:
+1. Fill in `toolbox/pre_run_decisions.md` (D1–D9) and copy the gate thresholds into `toolbox/backtest_notes.md`.
+2. Commit, then tag: `git tag v1.1-frozen`. That commit is your pre-registration.
+3. Every run records its git commit in `run_manifest.json`; a run from an uncommitted state doesn't count.
 
 ### 2.2 What is *not* allowed
 - Tuning OR length, entry window, R-multiple, exit time or filters to improve historical results.
 - Adding filters after seeing which days lost (e.g. "skip Mondays", "skip CPI days").
-- Choosing between 1.5R and 2R by result. 1.5R is primary; 2R is reported only.
+- Choosing a target by result. 1.5R is the only target in v1.1 (the 2R comparison was removed to take the temptation away).
+- Using `mae`/`mfe`-style "what if" analysis to redesign stops and targets (these columns were removed on purpose).
 
-### 2.3 In-sample vs. hold-out
-| Period | Use |
+### 2.3 Development vs. hold-out — governance
+
+The script enforces the wall: every run needs `--period dev` or `--period holdout`, and a hold-out
+run is refused unless the git worktree is clean.
+
+| Period (config) | Use |
 |---|---|
-| 2015-01-01 → 2021-12-31 (development) | Find bugs, check fills by hand, run sensitivity. Rules stay frozen. Bug fixes are allowed and logged. |
-| 2022-01-01 → latest (hold-out) | **Run once** with the frozen config. If it fails the gates, the result stands. Don't tweak and re-run. |
+| `dev_start`→`dev_end` (2015-01-01 → 2021-12-31) | Repeatable. Find data problems and bugs, hand-check trades, read sensitivity. **Rules stay frozen.** |
+| `holdout_start`→latest (2022-01-01 →) | **One use, ever.** Run once from the tagged commit. The result stands whatever it is. |
 
-Note that the hold-out covers a higher index level than the development period (check the exact range in your data), so the fixed-point $25 cap will skip more days there. That is part of the test, but it can leave the hold-out with very few trades (see gate 4).
+**Step-by-step after each run**
 
-If you later create v1.1, you have spent this hold-out. Validate v1.1 on **forward SIM data**, not on the same history.
+1. **Dev run** → work through the Proof checklist (playbook §4.2) and read the result against gates 1–3 and 5 for the dev period.
+   - Data or code problem found → fix it (bug fixes need a failing test first), commit, re-run **dev**. Repeat as needed; log every run.
+   - Dev result **FAIL** on gates 1–3 → **stop here. Do not run the hold-out.** v1.1 is rejected. The hold-out stays unused for a future version.
+   - Dev result **INCONCLUSIVE** (too few trades) → you may still run the hold-out, but expect INCONCLUSIVE overall.
+   - Dev result passes → tag the commit, then run the hold-out once.
+2. **Hold-out run** → record it in `backtest_notes.md` immediately, before interpreting it.
+   - **PASS** on all gates → move to paper trading (playbook §6).
+   - **INCONCLUSIVE** → paper trading as data collection only; **no live trading**.
+   - **FAIL** → v1.1 rejected. Write down why. No re-runs with changed rules.
+3. **Bug found after the hold-out was run** → allowed only for a bug where the code demonstrably did not follow the written rules: add a failing test, fix it, re-run dev **and** hold-out with identical rules, and record both the old and new results side by side. If the fix flips the verdict, treat the result as INCONCLUSIVE and confirm it with forward paper data.
+4. **Any new version (v1.2+) after the hold-out has been used** → validated on **forward paper data only** (sessions after the version's commit date). Historical data is used up for this strategy family.
+
+Note that the hold-out covers a higher index level than the development period (check the exact
+range in your data), so the fixed-point $25 cap will skip more days there. That can leave the
+hold-out with very few trades (gate 4).
 
 ### 2.4 Cost & fill model (in config)
 | Item | v1 assumption | Notes |
 |---|---|---|
 | Commission + fees | $1.00 per side per contract ($2 round trip) | Replace with your broker's all-in rate |
-| Entry | **Risk-capped limit order** (`entry_mode: capped_limit`): fills at the next bar's **open** + 1 tick, never worse than the limit; no fill if that open is beyond the limit | Pessimistic: ignores fills later in that minute. `market_bail` reproduces v1.0 (market entry, immediate exit with costs charged if risk > cap). |
+| Entry | **Risk-capped limit order**: fills at the next bar's **open** + 1 tick, never worse than the limit; no fill if that open is beyond the limit | Pessimistic: ignores fills later in that minute. |
 | Stop | Stop price − 1 tick; if the bar **opens beyond** the stop, fill at that open − 1 tick | Models gaps and fast markets |
 | Target | Limit at target, filled only if price trades **1 tick through** | Avoids assuming fills on a touch |
 | Time exit | Open of first bar ≥ 12:00, − 1 tick | |
+| Paper vs. model | Paper platforms usually fill limits on a touch and stops without slippage | Expect paper P&L ≥ model P&L. `session_tools.py reconcile` measures the gap daily. |
 | Stress test | `costs_x2_same_trades` (same trades, 2× commission + slippage) and `costs_x2_reselected` (full re-run; the cap then admits fewer trades) | A strategy that dies at 2× costs is fragile |
 
 ### 2.5 Ambiguous bars (stop and target inside the same bar)
@@ -95,34 +119,38 @@ If you later create v1.1, you have spent this hold-out. Validate v1.1 on **forwa
 | Trades, trade rate, **no-trade days by reason** | `summary.json`, `day_log.csv` | With a $25 cap, expect a low trade rate. Know why. |
 | Win rate, avg win/loss, **profit factor** | `summary.json` | |
 | **Expectancy** per trade ($ and R) | `summary.json` | The core edge number |
-| **Max drawdown** ($, % of $500), lowest equity, first date DD ≥ $150 | `summary.json` | Could you have survived it? |
+| **Max drawdown** ($, % of $500), lowest equity, first dates the pause ($100) and stop ($150) levels were reached | `summary.json` | Could you have survived it, and would the playbook have stopped you first? |
 | **Longest losing streak**; longest sessions without a win | `summary.json` | Psychological and capital survivability |
 | Monte Carlo (bootstrap of trade order): p50/p95 max DD, p95 losing streak, P(DD ≥ $250) | `summary.json` | Path risk the single history hides. Assumes trades are independent. Skipped below 30 trades. |
 | **Year-by-year** table | `by_year.csv` | Is profit spread out or concentrated in one year? |
 | **Regime** table: volatility tercile (prior 20-day ATR % vs. trailing year), trend (prior close vs. 200-day SMA) | `by_regime.csv` | Does it only work in one market type? |
 | Exit-reason mix, ambiguous-bar share, daily-limit breaches | `summary.json` | Sanity and model-risk checks |
-| Sensitivity: costs ×2 (same trades and re-selected), opposite ambiguity rule, alternate 2R | `sensitivity.csv` | Robustness, **not** selection |
+| Sensitivity: costs ×2 (same trades and re-selected), opposite ambiguity rule | `sensitivity.csv` | Robustness, **not** selection |
 | `warnings` (inconclusive trade count, no symbol column, regime warm-up, timezone flags) | `summary.json` | Must be resolved or accepted in writing |
 
 ### Statistical honesty
-- Standard error of expectancy ≈ `stdev(R) / √N`. With R-multiples (sd ≈ 1.1R) and N = 100 trades, SE ≈ 0.11R. An expectancy below about +0.2R is **not distinguishable from zero**.
+- Standard error of expectancy ≈ `stdev(R) / √N`. As a rough guide (assuming the R-multiples have sd ≈ 1.1R; use the real value from your trade log), with N = 100 trades SE ≈ 0.11R, so an expectancy below about +0.2R is **not distinguishable from zero**.
 - **Fewer than about 100 trades over 10 years means the result is inconclusive,** however good it looks. A low trade count is likely here (assumption A1).
 
 ---
 
 ## 4. Pass/fail gates (pre-registered — review and adjust *before* running)
 
-The strategy may move to forward SIM only if **all** of these hold:
+Check gate 4 first: if there are too few trades, the verdict is **INCONCLUSIVE** whatever the other numbers say.
 
-1. Development and hold-out both: expectancy > 0 after base costs, and profit factor ≥ 1.15.
-2. Under `costs_x2`: expectancy ≥ 0 (not deeply negative).
-3. The conclusion does not flip between stop-first and target-first ambiguity.
-4. Trades ≥ 100 across the full period; otherwise the verdict is **"inconclusive — gather forward SIM data"**. *(Decision pending D5: also set a minimum per period, e.g. ≥30 hold-out trades, below which gate 1 is "inconclusive" rather than pass/fail.)*
-5. No single year contributes more than 50% of net profit; at least 60% of years with trades are non-negative.
-6. Monte Carlo p95 max drawdown < $250 (50% of the account).
-7. Hand-check of 10 trades and 5 no-trade days matches the charts.
+| # | Gate | Applies to |
+|---|---|---|
+| 4 | Enough trades: ≥ 100 in total **and** ≥ the per-period minimum chosen in D5 (suggested 30 for the hold-out). Otherwise → INCONCLUSIVE. | each period |
+| 1 | Expectancy > 0 after base costs **and** profit factor ≥ 1.15 | dev and hold-out separately |
+| 2 | `costs_x2_same_trades` expectancy ≥ 0 | each period |
+| 3 | The sign of expectancy is the same under `ambiguous_target_first` | each period |
+| 5 | No single year > 50% of net profit; ≥ 60% of years with trades non-negative | full period |
+| 6 | Monte Carlo p95 max drawdown < $250. If Monte Carlo was skipped (< 30 trades) → INCONCLUSIVE. | full period |
+| 7 | Hand-check of 10 trades and 5 no-trade days matches the charts | each run |
 
-If gates 1–3 fail: v1 is rejected. Document it. A rejected hypothesis is a valid, useful result.
+**PASS** = all gates hold. **FAIL** = gate 1, 2 or 3 fails with enough trades. **INCONCLUSIVE** =
+gate 4 or 6 can't be met, or gate 5/7 problems are unresolved. Record the verdict in
+`backtest_notes.md` before discussing it with anyone (including an AI assistant).
 
 ---
 

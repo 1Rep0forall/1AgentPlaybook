@@ -8,7 +8,8 @@ walk with volatility clustering and an opening-hour volatility bump. Use it
 only to confirm the script runs, outputs are produced, and the Proof
 checklist can be completed. Then replace it with real vendor data.
 
-Each session has 09:20-15:59 ET bars (10 pre-open bars so the open-alignment
+Dates default to 2016-2017 (inside the dev period, so smoke runs never touch the
+hold-out window). Each session has 09:20-15:59 ET bars (10 pre-open bars so the open-alignment
 check can run) and a `symbol` column that rolls quarterly (ESH23, ESM23, ...).
 
     # default volatility: almost every opening range is too wide for $25
@@ -37,9 +38,9 @@ def front_symbol(day: pd.Timestamp) -> str:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--start", default="2023-01-01")
-    ap.add_argument("--end", default="2024-12-31")
-    ap.add_argument("--start-price", type=float, default=3800.0)
+    ap.add_argument("--start", default="2016-01-01")
+    ap.add_argument("--end", default="2017-12-31")
+    ap.add_argument("--start-price", type=float, default=2000.0)
     ap.add_argument("--daily-vol", type=float, default=0.010, help="typical daily volatility (fraction)")
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", default="data/synthetic_1min.csv")

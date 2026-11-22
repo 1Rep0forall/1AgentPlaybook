@@ -14,14 +14,10 @@ For each regular trading session (RTH, Eastern Time):
      weekdays with no data (holidays / gaps).
   3. Looks for the FIRST completed signal bar (default 5-min) that CLOSES
      outside the OR between 09:45 and 11:00 ET. Max 1 trade per session.
-  4. Entry (entry_mode):
-       capped_limit (default, v1.1) — a limit order at the worst price that
-         still keeps all-in risk <= the cap. Fills at the next bar's open +
-         slippage (never worse than the limit). If that open is already past
-         the limit, there is no trade (`entry_limit_not_filled`).
-       market_bail — v1.0 behaviour: market order at the next bar's open; if
-         the fill makes risk > cap the trade is closed immediately and the
-         round-trip costs are CHARGED (`risk_cap_bailout`).
+  4. Entry: a limit order at the worst price that still keeps all-in risk
+     <= the cap. Fills at the next bar's open + slippage (never worse than
+     the limit). If that open is already past the limit: no trade
+     (`entry_limit_not_filled`).
   5. Stop at the opposite OR boundary, target at a fixed R-multiple (tick-
      rounded away from entry), flat at a fixed time-exit cutoff.
   6. Charges commissions + slippage, resolves ambiguous bars conservatively
@@ -65,9 +61,14 @@ CSV with a header row. Columns (case-insensitive):
 
 USAGE
 -----
-    python backtest/orb_backtest.py --data data/es_1min.csv \
-        --data-tz America/Chicago --config toolbox/backtest_config.json \
-        --out results
+    python backtest/orb_backtest.py --period dev --data data/es_1min.csv \
+        --data-tz America/Chicago --config toolbox/backtest_config.json
+
+  --period is REQUIRED:
+    dev      only sessions in [dev_start, dev_end]; run as often as needed.
+    holdout  only sessions >= holdout_start. ONE use ever (Blueprint §2.3);
+             refused unless the git worktree is clean, so the result is tied
+             to a committed config + code.
 
 Requires: Python 3.9+, pandas, numpy. matplotlib optional (equity chart).
 Tests:    python -m pytest tests/
@@ -103,6 +104,15 @@ RTH_START_MIN = 9 * 60 + 30   # 09:30 ET
 RTH_END_MIN = 16 * 60         # 16:00 ET
 NEVER = 10**9                 # sentinel index: "event never happened"
 
+# Data-hygiene / reporting constants. Deliberately NOT in the config file:
+# the config holds trading rules and the cost model only, so every key in it
+# is something the playbook tells you to do.
+MIN_OR_COVERAGE = 1.0          # all opening-range bars must exist
+MAX_OFF_GRID_FRACTION = 0.01   # above this share of off-tick rows the file is rejected
+MONTE_CARLO_RUNS = 5000
+MIN_TRADES_FOR_MONTE_CARLO = 30
+RANDOM_SEED = 42
+
 # Every no-trade reason the backtest can emit. The playbook's no-trade table
 # uses the same codes (enforced by tests/test_orb_backtest.py).
 REASON_CODES: Dict[str, str] = {
@@ -117,6 +127,12 @@ REASON_CODES: Dict[str, str] = {
     "no_entry_bar": "No bar available to enter on after the signal",
     "entry_beyond_stop": "Next bar opened back through the stop level",
     "entry_limit_not_filled": "Next bar opened past the risk-capped limit price",
+}
+
+# Codes only a person can log (paper/live), never emitted by the backtest.
+LIVE_ONLY_REASON_CODES: Dict[str, str] = {
+    "daily_loss_limit": "Day P&L <= -daily_loss_limit_usd: no more trading today",
+    "not_ready": "Pre-session checklist not fully green (incl. status verdict not GO)",
 }
 
 # Columns shared by the backtest trade log and the live/paper trade log
@@ -150,35 +166,34 @@ class Config:
     signal_minutes: int = 5           # breakout is judged on completed N-min bars
 
     # Entry / exits / risk
-    entry_mode: str = "capped_limit"  # "capped_limit" | "market_bail"
-    target_r: float = 1.5             # primary (pre-registered) target
-    alt_target_r: List[float] = field(default_factory=lambda: [2.0])  # reported, not optimized
+    target_r: float = 1.5             # the one pre-registered target
     max_risk_usd: float = 25.0        # all-in $ risk cap per trade (stop + slip + fees)
     daily_loss_limit_usd: float = 50.0
     min_or_points: float = 1.0        # skip degenerate/tiny ranges
+
+    # Account escalation (playbook §2.2) — reported by the backtest, enforced
+    # in paper/live by backtest/session_tools.py status
+    drawdown_pause_usd: float = 100.0
+    drawdown_stop_usd: float = 150.0
 
     # Costs
     commission_per_side_usd: float = 1.00   # commission + exchange + NFA, per contract per side
     entry_slippage_ticks: int = 1
     stop_slippage_ticks: int = 1
-    time_exit_slippage_ticks: int = 1       # also used for market_bail exits
-    target_slippage_ticks: int = 0          # limit order
+    time_exit_slippage_ticks: int = 1
+    target_slippage_ticks: int = 0          # limit order (no slippage)
     target_trade_through_ticks: int = 1     # limit counts as filled only if price trades THROUGH it
 
     # Ambiguity: when stop and target are both inside one bar
     ambiguous_bar_rule: str = "stop_first"  # "stop_first" (conservative) | "target_first"
 
-    # Data hygiene
-    min_or_coverage: float = 1.0      # fraction of expected OR bars that must exist
-    max_off_grid_fraction: float = 0.01  # above this share of off-tick prices the file is rejected
-
-    # Reporting
-    drawdown_alert_usd: float = 150.0  # report first date drawdown exceeded this
-    start_date: Optional[str] = None   # "YYYY-MM-DD" inclusive
+    # Research periods (Blueprint §2.3). The hold-out is used ONCE.
+    dev_start: str = "2015-01-01"
+    dev_end: str = "2021-12-31"
+    holdout_start: str = "2022-01-01"
+    # Optional narrowing INSIDE the chosen period (e.g. MES-only from 2019-05-06)
+    start_date: Optional[str] = None
     end_date: Optional[str] = None
-    monte_carlo_runs: int = 5000
-    min_trades_for_monte_carlo: int = 30
-    random_seed: int = 42
 
 
 def hhmm_to_min(s: str) -> int:
@@ -195,16 +210,38 @@ def validate_config(cfg: Config) -> None:
         raise ValueError(msg)
     if cfg.ambiguous_bar_rule not in ("stop_first", "target_first"):
         fail("ambiguous_bar_rule must be 'stop_first' or 'target_first'")
-    if cfg.entry_mode not in ("capped_limit", "market_bail"):
-        fail("entry_mode must be 'capped_limit' or 'market_bail'")
+    if not pd.Timestamp(cfg.dev_start) <= pd.Timestamp(cfg.dev_end) < pd.Timestamp(cfg.holdout_start):
+        fail("periods must satisfy dev_start <= dev_end < holdout_start")
+    if not 0 < cfg.drawdown_pause_usd <= cfg.drawdown_stop_usd:
+        fail("need 0 < drawdown_pause_usd <= drawdown_stop_usd")
     ors, ore = hhmm_to_min(cfg.or_start), hhmm_to_min(cfg.or_end)
     es, ee, xt = hhmm_to_min(cfg.entry_start), hhmm_to_min(cfg.entry_end), hhmm_to_min(cfg.exit_time)
     if not (RTH_START_MIN <= ors < ore <= es < ee < xt <= RTH_END_MIN):
         fail("windows must satisfy 09:30 <= or_start < or_end <= entry_start < entry_end < exit_time <= 16:00")
     if (ee - es) % cfg.signal_minutes != 0:
         fail("entry window length must be a multiple of signal_minutes")
-    if cfg.max_risk_usd <= 2 * cfg.commission_per_side_usd * cfg.contracts:
-        fail("max_risk_usd must exceed round-trip commission")
+    if derived_numbers(cfg)["limit_offset_pts"] <= 0:
+        fail("max_risk_usd is too small to cover fees and slippage")
+
+
+def derived_numbers(cfg: Config) -> dict:
+    """The session numbers the playbook/checklist quote, derived from the
+    config so they can never drift from it (tests compare them to the docs)."""
+    tick, pv = cfg.tick_size, cfg.point_value * cfg.contracts
+    rt_comm = 2 * cfg.commission_per_side_usd * cfg.contracts
+    allowed_pts = (cfg.max_risk_usd - rt_comm) / pv - cfg.stop_slippage_ticks * tick
+    limit_ticks = int(np.floor(allowed_pts / tick + 1e-9))
+    # Pre-check passes while (width + (1 + entry_slip + stop_slip) ticks) * pv + fees <= cap
+    width_ticks = int(np.floor(((cfg.max_risk_usd - rt_comm) / pv) / tick + 1e-9)) \
+        - (1 + cfg.entry_slippage_ticks + cfg.stop_slippage_ticks)
+    return {
+        "round_trip_commission_usd": rt_comm,
+        "limit_offset_pts": limit_ticks * tick,          # limit = stop +/- this
+        "max_or_width_pts": width_ticks * tick,          # widest range the 09:45 pre-check accepts
+        "precheck_extra_pts": (1 + cfg.entry_slippage_ticks + cfg.stop_slippage_ticks) * tick,
+        "min_or_points": cfg.min_or_points,
+        "target_r": cfg.target_r,
+    }
 
 
 def load_config(path: Optional[str]) -> Config:
@@ -278,7 +315,7 @@ def open_alignment_check(df: pd.DataFrame) -> dict:
 
 
 def load_bars(path: str, data_tz: Optional[str], bar_label: str, tick: float = 0.25,
-              max_off_grid_fraction: float = 0.01):
+              max_off_grid_fraction: float = MAX_OFF_GRID_FRACTION):
     """Returns (rth_bars, bar_minutes, hygiene_report). Raises DataError."""
     df = pd.read_csv(path)
     df.columns = [c.strip().lower() for c in df.columns]
@@ -367,11 +404,7 @@ def first_true(mask: np.ndarray) -> int:
 def risk_capped_limit(stop: float, d: int, cfg: Config) -> float:
     """Worst entry price at which all-in risk (stop distance + stop slippage +
     round-trip commission) still fits within max_risk_usd."""
-    tick, pv = cfg.tick_size, cfg.point_value * cfg.contracts
-    rt_comm = 2 * cfg.commission_per_side_usd * cfg.contracts
-    allowed_pts = (cfg.max_risk_usd - rt_comm) / pv - cfg.stop_slippage_ticks * tick
-    allowed_ticks = int(np.floor(allowed_pts / tick + 1e-9))
-    return stop + d * allowed_ticks * tick
+    return stop + d * derived_numbers(cfg)["limit_offset_pts"]
 
 
 def simulate_day(date, tod, o, h, l, c, cfg: Config, bar_min: int, target_r: float) -> dict:
@@ -389,7 +422,7 @@ def simulate_day(date, tod, o, h, l, c, cfg: Config, bar_min: int, target_r: flo
 
     # 1) Opening range ----------------------------------------------------
     in_or = (tod >= ors) & (tod < ore)
-    if in_or.sum() < cfg.min_or_coverage * (ore - ors) / bar_min - 1e-9:
+    if in_or.sum() < MIN_OR_COVERAGE * (ore - ors) / bar_min - 1e-9:
         return no_trade("incomplete_or_data")
     or_hi, or_lo = float(h[in_or].max()), float(l[in_or].min())
     width = or_hi - or_lo
@@ -429,10 +462,8 @@ def simulate_day(date, tod, o, h, l, c, cfg: Config, bar_min: int, target_r: flo
     d = direction
     stop = or_lo if d == 1 else or_hi
     limit = risk_capped_limit(stop, d, cfg)
-    rec.update(direction="long" if d == 1 else "short",
-               signal_bar_close=min_to_hhmm(signal_close_min), stop_price=stop)
-    if cfg.entry_mode == "capped_limit":
-        rec["entry_limit_price"] = limit
+    rec.update(direction="long" if d == 1 else "short", signal_bar_close=min_to_hhmm(signal_close_min),
+               stop_price=stop, entry_limit_price=limit)
 
     # 3) Entry on the next bar's open -------------------------------------
     after = np.flatnonzero(tod >= signal_close_min)
@@ -442,19 +473,16 @@ def simulate_day(date, tod, o, h, l, c, cfg: Config, bar_min: int, target_r: flo
     open_k = float(o[k])
     if (open_k - stop) * d <= 0:
         return no_trade("entry_beyond_stop")
-    if cfg.entry_mode == "capped_limit":
-        if (open_k - limit) * d > 0:
-            return no_trade("entry_limit_not_filled")
-        entry = open_k + d * cfg.entry_slippage_ticks * tick
-        if (entry - limit) * d > 0:      # a limit order never fills worse than its price
-            entry = limit
-    else:
-        entry = open_k + d * cfg.entry_slippage_ticks * tick
+    if (open_k - limit) * d > 0:
+        return no_trade("entry_limit_not_filled")
+    entry = open_k + d * cfg.entry_slippage_ticks * tick
+    if (entry - limit) * d > 0:          # a limit order never fills worse than its price
+        entry = limit
     entry_slip_usd = (entry - open_k) * d * pv
     risk_pts = (entry - stop) * d
     risk_usd = (risk_pts + cfg.stop_slippage_ticks * tick) * pv + rt_comm
 
-    def finish(exit_raw, exit_px, exit_min, reason, exit_slip_ticks, target, ambiguous, mae, mfe):
+    def finish(exit_px, exit_min, reason, exit_slip_ticks, target, ambiguous):
         net = (exit_px - entry) * d * pv - rt_comm
         rec.update(
             traded=True, entry_time=min_to_hhmm(int(tod[k])), entry_price=entry,
@@ -464,17 +492,9 @@ def simulate_day(date, tod, o, h, l, c, cfg: Config, bar_min: int, target_r: flo
             gross_usd=round((exit_px - entry) * d * pv, 2), commission_usd=rt_comm,
             slippage_usd=round(entry_slip_usd + exit_slip_ticks * tick * pv, 2),
             net_usd=round(net, 2), r_multiple=round(net / risk_usd, 3),
-            mae_pts=float(max(mae, 0)), mfe_pts=float(max(mfe, 0)),
             daily_limit_breach=bool(net < -cfg.daily_loss_limit_usd),
         )
         return rec
-
-    if cfg.entry_mode == "market_bail" and risk_usd > cfg.max_risk_usd + 1e-9:
-        # Playbook v1.0 behaviour: the fill is too far from the stop, so the
-        # position is closed straight away at market — costs are real.
-        exit_px = open_k - d * cfg.time_exit_slippage_ticks * tick
-        return finish(open_k, exit_px, int(tod[k]), "risk_cap_bailout",
-                      cfg.time_exit_slippage_ticks, np.nan, False, 0.0, 0.0)
 
     # Snap target to the tick grid, rounding AWAY from entry (conservative).
     raw_target = entry + d * target_r * risk_pts
@@ -496,31 +516,25 @@ def simulate_day(date, tod, o, h, l, c, cfg: Config, bar_min: int, target_r: flo
             exit_raw, exit_min, reason = float(o[k_exit]), int(tod[k_exit]), "time_exit"
         else:  # early close / data ends before cutoff
             exit_raw, exit_min, reason = float(c[-1]), int(tod[-1]) + bar_min, "data_end_exit"
-        exit_slip, last = cfg.time_exit_slippage_ticks, len(oo) - 1
+        exit_slip = cfg.time_exit_slippage_ticks
     elif si < ti or (ambiguous and cfg.ambiguous_bar_rule == "stop_first"):
         gapped = (oo[si] <= stop) if d == 1 else (oo[si] >= stop)
         gapped = bool(gapped) and si > 0  # the entry bar opens at our entry, beyond the stop
         exit_raw = float(oo[si]) if gapped else stop
         exit_min, reason = int(tod[k + si]), ("stop_gap" if gapped else "stop")
-        exit_slip, last = cfg.stop_slippage_ticks, si
+        exit_slip = cfg.stop_slippage_ticks
     else:
         exit_raw, exit_min, reason = target, int(tod[k + ti]), "target"
-        exit_slip, last = cfg.target_slippage_ticks, ti
+        exit_slip = cfg.target_slippage_ticks
     exit_px = exit_raw - d * exit_slip * tick
-
-    if d == 1:
-        mae, mfe = entry - ll[: last + 1].min(), hh[: last + 1].max() - entry
-    else:
-        mae, mfe = hh[: last + 1].max() - entry, entry - ll[: last + 1].min()
-    return finish(exit_raw, exit_px, exit_min, reason, exit_slip, target, ambiguous, mae, mfe)
+    return finish(exit_px, exit_min, reason, exit_slip, target, ambiguous)
 
 
 TRADE_COLUMNS = [
     "or_high", "or_low", "or_width_pts", "min_risk_usd", "direction", "signal_bar_close",
     "entry_limit_price", "entry_time", "entry_price", "stop_price", "target_price", "risk_pts",
     "risk_usd", "exit_time", "exit_price", "exit_reason", "ambiguous_bar", "pnl_pts", "gross_usd",
-    "commission_usd", "slippage_usd", "net_usd", "r_multiple", "mae_pts", "mfe_pts",
-    "daily_limit_breach",
+    "commission_usd", "slippage_usd", "net_usd", "r_multiple", "daily_limit_breach",
 ]
 
 
@@ -641,7 +655,8 @@ def full_summary(day_log: pd.DataFrame, cfg: Config) -> dict:
     if len(trades):
         eq = cfg.starting_capital + np.cumsum(pnl)
         peak = np.maximum.accumulate(np.r_[cfg.starting_capital, eq])[1:]
-        breach = np.flatnonzero(peak - eq >= cfg.drawdown_alert_usd)
+        dd = peak - eq
+        pause, stop = np.flatnonzero(dd >= cfg.drawdown_pause_usd), np.flatnonzero(dd >= cfg.drawdown_stop_usd)
         s.update(
             avg_win_usd=round(float(pnl[pnl > 0].mean()), 2) if (pnl > 0).any() else None,
             avg_loss_usd=round(float(pnl[pnl <= 0].mean()), 2) if (pnl <= 0).any() else None,
@@ -651,7 +666,10 @@ def full_summary(day_log: pd.DataFrame, cfg: Config) -> dict:
             max_drawdown_pct_of_start=round(100 * s["max_drawdown_usd"] / cfg.starting_capital, 1),
             ending_equity_usd=round(float(eq[-1]), 2),
             lowest_equity_usd=round(float(min(eq.min(), cfg.starting_capital)), 2),
-            first_date_dd_exceeded_alert=str(trades["date"].iloc[breach[0]]) if breach.size else None,
+            # Report-only: the backtest keeps trading so you see the full distribution;
+            # in paper/live the playbook would have paused / stopped on these dates.
+            first_date_dd_reached_pause=str(trades["date"].iloc[pause[0]]) if pause.size else None,
+            first_date_dd_reached_stop=str(trades["date"].iloc[stop[0]]) if stop.size else None,
             exit_reasons={k: int(v) for k, v in trades["exit_reason"].value_counts().items()},
             ambiguous_bars=int(trades["ambiguous_bar"].astype(bool).sum()),
             ambiguous_bar_share=round(float(trades["ambiguous_bar"].astype(bool).mean()), 3),
@@ -676,11 +694,11 @@ def grouped(day_log: pd.DataFrame, key: str) -> pd.DataFrame:
 
 def monte_carlo(pnl: np.ndarray, cfg: Config) -> dict:
     """Bootstrap trade order (assumes trades are independent — they may not be)."""
-    if pnl.size < cfg.min_trades_for_monte_carlo:
-        return {"note": f"only {pnl.size} trades (< {cfg.min_trades_for_monte_carlo}); "
+    if pnl.size < MIN_TRADES_FOR_MONTE_CARLO:
+        return {"note": f"only {pnl.size} trades (< {MIN_TRADES_FOR_MONTE_CARLO}); "
                         "Monte Carlo skipped — too few trades to say anything about path risk"}
-    rng = np.random.default_rng(cfg.random_seed)
-    sims = rng.choice(pnl, size=(cfg.monte_carlo_runs, pnl.size), replace=True)
+    rng = np.random.default_rng(RANDOM_SEED)
+    sims = rng.choice(pnl, size=(MONTE_CARLO_RUNS, pnl.size), replace=True)
     eq = np.cumsum(sims, axis=1)
     peak = np.maximum.accumulate(np.concatenate([np.zeros((sims.shape[0], 1)), eq], axis=1), axis=1)[:, 1:]
     mdd = (peak - eq).max(axis=1)
@@ -690,7 +708,7 @@ def monte_carlo(pnl: np.ndarray, cfg: Config) -> dict:
     streak = (idx - last_reset).max(axis=1)
     half = cfg.starting_capital / 2
     return {
-        "runs": cfg.monte_carlo_runs,
+        "runs": MONTE_CARLO_RUNS,
         "max_dd_usd_p50": round(float(np.percentile(mdd, 50)), 2),
         "max_dd_usd_p95": round(float(np.percentile(mdd, 95)), 2),
         "losing_streak_p50": int(np.percentile(streak, 50)),
@@ -731,8 +749,6 @@ def sensitivity(bars, cfg: Config, bar_min: int, base_day_log: pd.DataFrame) -> 
     other = "target_first" if cfg.ambiguous_bar_rule == "stop_first" else "stop_first"
     reruns[f"ambiguous_{other}"] = (replace(cfg, ambiguous_bar_rule=other), cfg.target_r,
                                     "opposite ambiguous-bar assumption")
-    for r in cfg.alt_target_r:
-        reruns[f"target_{r}R"] = (cfg, r, "pre-declared alternate target (report only)")
     for name, (c, r, note) in reruns.items():
         dl = run_backtest(bars, c, bar_min, r, include_missing_weekdays=False)
         rows.append(row(name, dl[dl["traded"]], note))
@@ -763,6 +779,18 @@ def try_plot(trades: pd.DataFrame, cfg: Config, path: Path) -> bool:
     return True
 
 
+def select_period(bars: pd.DataFrame, cfg: Config, period: str) -> pd.DataFrame:
+    """Hard wall between development and hold-out data (Blueprint §2.3)."""
+    dates = bars["date"]
+    if period == "dev":
+        keep = (dates >= pd.Timestamp(cfg.dev_start).date()) & (dates <= pd.Timestamp(cfg.dev_end).date())
+    elif period == "holdout":
+        keep = dates >= pd.Timestamp(cfg.holdout_start).date()
+    else:
+        raise ValueError(period)
+    return bars[keep]
+
+
 def git_info(script: Path) -> dict:
     def run(*args):
         try:
@@ -780,6 +808,8 @@ def git_info(script: Path) -> dict:
 # --------------------------------------------------------------------------
 def main(argv=None) -> Path:
     ap = argparse.ArgumentParser(description="MES 15-min ORB backtest (v1.1)")
+    ap.add_argument("--period", required=True, choices=["dev", "holdout"],
+                    help="dev = [dev_start, dev_end], repeatable; holdout = >= holdout_start, ONE use ever")
     ap.add_argument("--data", required=True, help="CSV of intraday bars (see header docs)")
     ap.add_argument("--config", default=None, help="JSON config (toolbox/backtest_config.json)")
     ap.add_argument("--data-tz", default=None, help="tz of naive timestamps, e.g. America/Chicago")
@@ -791,14 +821,22 @@ def main(argv=None) -> Path:
     cfg = load_config(args.config)
     try:
         bars_all, bar_min, hygiene = load_bars(args.data, args.data_tz, args.bar_label,
-                                               cfg.tick_size, cfg.max_off_grid_fraction)
+                                               cfg.tick_size)
     except DataError as e:
         sys.exit(f"Data error: {e}")
     if cfg.signal_minutes % bar_min != 0:
         sys.exit(f"signal_minutes ({cfg.signal_minutes}) must be a multiple of the bar size ({bar_min}).")
 
     regimes = compute_regimes(bars_all)       # full history -> lookbacks warmed up
-    bars = bars_all
+    script = Path(__file__).resolve()
+    git = git_info(script)
+    bars = select_period(bars_all, cfg, args.period)
+    if args.period == "holdout":
+        if git["git_commit"] is None or git["git_worktree_dirty"]:
+            sys.exit("Refusing the hold-out run: commit all changes first (clean git worktree), so the "
+                     "one-time hold-out result is tied to a recorded config + code version.")
+        print("*** HOLD-OUT RUN: this is your one use of the hold-out period. Record the run_id in "
+              "toolbox/backtest_notes.md whatever the result. ***")
     if cfg.start_date:
         bars = bars[bars["date"] >= pd.Timestamp(cfg.start_date).date()]
     if cfg.end_date:
@@ -810,13 +848,13 @@ def main(argv=None) -> Path:
     hygiene.update(tested_sessions=int(bars["date"].nunique()),
                    sessions_of_history_before_start=history_before)
 
-    script = Path(__file__).resolve()
     data_hash = file_sha256(args.data)
     script_hash = file_sha256(script)
-    identity = json.dumps({"config": asdict(cfg), "data_tz": args.data_tz, "bar_label": args.bar_label,
+    identity = json.dumps({"config": asdict(cfg), "period": args.period,
+                           "data_tz": args.data_tz, "bar_label": args.bar_label,
                            "script_sha256": script_hash}, sort_keys=True)
     cfg_hash = hashlib.sha256(identity.encode()).hexdigest()[:8]
-    run_id = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}_cfg{cfg_hash}_data{data_hash[:8]}"
+    run_id = f"{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}_{args.period}_cfg{cfg_hash}_data{data_hash[:8]}"
     out = Path(args.out) / run_id
     out.mkdir(parents=True, exist_ok=True)
 
@@ -858,8 +896,8 @@ def main(argv=None) -> Path:
 
     (out / "summary.json").write_text(json.dumps(summary, indent=2, default=str))
     manifest = {
-        "run_id": run_id, "script_version": SCRIPT_VERSION, "script_sha256": script_hash,
-        **git_info(script),
+        "run_id": run_id, "period": args.period, "script_version": SCRIPT_VERSION,
+        "script_sha256": script_hash, **git,
         "created_utc": datetime.now(timezone.utc).isoformat(),
         "data_file": str(args.data), "data_sha256": data_hash,
         "data_tz_arg": args.data_tz, "bar_label": args.bar_label,
