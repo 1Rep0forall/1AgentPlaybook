@@ -1,12 +1,13 @@
-# MES ORB Playbook — v1.1 (draft until frozen)
+# MES ORB Playbook — v1.1 (frozen)
 
 > **One Agent + Playbook + Toolbox + Proof.** One agent (you, helped by an AI assistant following
 > `CLAUDE.md`) runs the *same* playbook every session, uses the *same* tools, and calls nothing
 > "done" without the *same* proof. Rules change only through §5.
 
 **Status:** paper (SIM) only. No live capital until §6 is met.
-**Not yet frozen:** the rules become v1.1-frozen when `toolbox/pre_run_decisions.md` is filled in,
-committed and tagged `v1.1-frozen`. Until then, this is a draft.
+**Frozen** at git tag `v1.1-frozen` (decisions in `toolbox/pre_run_decisions.md`). The $1.00/side
+fee is a **placeholder** (D4); only the D4 rule in that file allows it to change within v1.1.
+The data spec (D8) must be filled in before the first real-data run.
 **Numbers come from config:** every number below is derived from `toolbox/backtest_config.json`.
 Print today's values with `python backtest/session_tools.py rules`; a test fails if this page and
 the config disagree.
@@ -92,8 +93,8 @@ second signal. Compare your no-trade rate with the backtest's `trade_rate` inste
 | Any single loss > $50 | Investigate the fill. Check order type and broker settings before the next session. |
 | Proof missing for an earlier session | **FIX-PROOF**: complete it before trading again. |
 
-The $150 stop is a pending choice (D6 in `toolbox/pre_run_decisions.md`), because it is likely to
-trigger on ordinary losing streaks (A3).
+The $150 stop was fixed in advance (D6) knowing that it may trigger on an ordinary losing streak
+(A3). If it does, v1 stops; you don't raise it after the fact.
 
 ### 2.4 Account and broker realism (small account)
 
@@ -117,7 +118,7 @@ trigger on ordinary losing streaks (A3).
 | **Session tools** | `backtest/session_tools.py` | `rules` (today's numbers), `status` (GO/PAUSE/STOP/FIX-PROOF), `reconcile` (your log vs. the model for one session). |
 | **Trade log** | `toolbox/trade_log_template.csv` | Copy once to `logs/trade_log_<year>.csv`; one row per session, incl. no-trade days. Same column names as the backtest. |
 | **Session checklist** | `toolbox/session_checklist.md` | Copy to `logs/sessions/YYYY-MM-DD.md` each day and tick it. |
-| **Decisions** | `toolbox/pre_run_decisions.md` | D1–D9, made once before the first real run. |
+| **Decisions** | `toolbox/pre_run_decisions.md` | D1–D9, made 2026-11-22 before any real data (D8 data spec still to fill). |
 | **Run registry** | `toolbox/backtest_notes.md` | Every backtest run and every playbook change, with a reason. |
 | **Backtest engine** | `backtest/orb_backtest.py` | Same script for every test; only config and data change. `--period dev|holdout` is required. |
 | **Tests** | `tests/test_orb_backtest.py` | `python -m pytest tests/ -q` after any change. Includes checks that docs, template and config agree with the code. |
@@ -166,7 +167,7 @@ Never change a rule in the middle of a session, a losing streak, or a conversati
 ## 6. Paper → live (all required)
 
 1. Backtest verdict **PASS** (Blueprint §4). **INCONCLUSIVE or FAIL never goes live**: keep paper trading as data collection, or stop.
-2. ≥ 40 paper sessions with **zero** rule violations, and the paper-trade count chosen in D7.
+2. **Both** ≥ 40 paper sessions and ≥ 15 paper trades (D7), with **zero** rule violations.
 3. `reconcile`: no unexplained `DECISION_MISMATCH`; entry/exit price differences average ≤ 1 tick against the model.
 4. Broker margin, minimum balance, auto-liquidation level and fees confirmed in writing; platform risk limits set (§2.4).
 5. Written: *"A normal losing streak can cost $___ (backtest Monte Carlo p95 drawdown). I will not change rules mid-streak."*

@@ -1,6 +1,6 @@
 {
   "_about": "MES ORB rules + cost model + research periods. Every key here is a rule the playbook makes you follow. Keys starting with _ are comments.",
-  "_version": "v1.1 DRAFT — becomes frozen when toolbox/pre_run_decisions.md is filled in and committed (tag it v1.1-frozen). After that: any change = v1.2.",
+  "_version": "v1.1 FROZEN (git tag v1.1-frozen, decisions 2026-11-22 in toolbox/pre_run_decisions.md). Any change = v1.2, except the D4 fee placeholder rule there.",
 
   "point_value": 5.0,
   "tick_size": 0.25,
@@ -23,6 +23,7 @@
   "drawdown_stop_usd": 150.0,
 
   "_cost_model": "Conservative fill model. Do not 'improve' these to make results look better; change only with evidence from reconcile logs.",
+  "_commission_note": "PLACEHOLDER $1.00/side until the broker all-in fee schedule is confirmed (D4).",
   "commission_per_side_usd": 1.00,
   "entry_slippage_ticks": 1,
   "stop_slippage_ticks": 1,

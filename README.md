@@ -1,4 +1,4 @@
-# 1AgentPlaybook — MES Opening Range Breakout (v1.1, draft until frozen)
+# 1AgentPlaybook — MES Opening Range Breakout (v1.1, frozen at tag `v1.1-frozen`)
 
 A rules-based research and paper-trading workflow for a 15-minute Opening Range
 Breakout on Micro E-mini S&P 500 futures (MES), built on the
@@ -13,7 +13,7 @@ Breakout on Micro E-mini S&P 500 futures (MES), built on the
 | Agent instructions (daily loop, boundaries) | `CLAUDE.md` |
 | Playbook (rules, no-trade codes, escalation, proof, change process) | `playbook/MES_ORB_Playbook_v1.md` |
 | 10-year backtest blueprint (method, hold-out governance, gates) | `playbook/Backtest_Blueprint.md` |
-| Rules config (frozen once D1–D9 are committed and tagged) | `toolbox/backtest_config.json` |
+| Rules config (frozen at `v1.1-frozen`; fee is a $1.00/side placeholder, D4) | `toolbox/backtest_config.json` |
 | Pre-run decisions D1–D9 | `toolbox/pre_run_decisions.md` |
 | Trade log template / session checklist | `toolbox/trade_log_template.csv`, `toolbox/session_checklist.md` |
 | Run registry, change log, pause reviews | `toolbox/backtest_notes.md` |
@@ -33,7 +33,7 @@ Smoke test (synthetic data, 2016–2017, inside the dev period; results mean not
 python backtest/make_synthetic_data.py --daily-vol 0.0012 --out data/synthetic_quiet.csv
 python backtest/orb_backtest.py --period dev --data data/synthetic_quiet.csv --out /tmp/orb_smoke
 ```
-Real data (after D1–D9 are committed and tagged; example: naive Central-Time 1-min ES bars stamped at bar start):
+Real data (fill in the D8 data spec first; example: naive Central-Time 1-min ES bars stamped at bar start):
 ```bash
 python backtest/orb_backtest.py --period dev --data data/es_1min.csv --data-tz America/Chicago --bar-label start --config toolbox/backtest_config.json
 ```

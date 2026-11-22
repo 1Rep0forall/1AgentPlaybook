@@ -24,7 +24,8 @@ If these disagree with each other or with this file, stop and report the conflic
 - Never report backtest or paper results you have not produced from files in this repo. Say
   "not run yet" when that is the truth.
 - Never edit a frozen config in place, and never weaken the cost model (`_cost_model`) without
-  `reconcile` evidence logged in `backtest_notes.md`.
+  `reconcile` evidence logged in `backtest_notes.md`. The only exception is the D4 fee placeholder
+  rule in `toolbox/pre_run_decisions.md` (before any real-data run, new `-rN` tag, never moving `v1.1-frozen`).
 - Live trading is out of scope until playbook §6 is met. Say so if asked.
 
 ## Daily operating loop

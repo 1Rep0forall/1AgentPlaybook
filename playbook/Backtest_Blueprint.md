@@ -140,7 +140,7 @@ Check gate 4 first: if there are too few trades, the verdict is **INCONCLUSIVE**
 
 | # | Gate | Applies to |
 |---|---|---|
-| 4 | Enough trades: ≥ 100 in total **and** ≥ the per-period minimum chosen in D5 (suggested 30 for the hold-out). Otherwise → INCONCLUSIVE. | each period |
+| 4 | Enough trades (D5): ≥ 100 in total **and** ≥ 30 in the hold-out. Otherwise → INCONCLUSIVE. | each period |
 | 1 | Expectancy > 0 after base costs **and** profit factor ≥ 1.15 | dev and hold-out separately |
 | 2 | `costs_x2_same_trades` expectancy ≥ 0 | each period |
 | 3 | The sign of expectancy is the same under `ambiguous_target_first` | each period |
