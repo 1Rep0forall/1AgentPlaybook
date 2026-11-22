@@ -1,2 +1,2 @@
-date,playbook_version,mode,or_high,or_low,or_width_pts,est_risk_usd,decision,no_trade_reason,direction,signal_bar_close,entry_time,entry_price,stop_price,target_price,exit_time,exit_price,exit_reason,contracts,commission_usd,net_usd,r_multiple,daily_pnl_usd,rule_violation,chart_screenshot_path,notes
-2026-11-23,v1.0,SIM,,,,,,,,,,,,,,,,1,,,,,N,,example row - delete
+date,playbook_version,mode,traded,no_trade_reason,or_high,or_low,or_width_pts,min_risk_usd,direction,signal_bar_close,entry_limit_price,entry_time,entry_price,stop_price,target_price,risk_pts,risk_usd,exit_time,exit_price,exit_reason,contracts,gross_usd,commission_usd,slippage_usd,net_usd,r_multiple,daily_pnl_usd,equity_usd,rule_violation,event_tags,broker_order_ids,chart_screenshot_path,notes
+2026-11-23,v1.1,SIM,False,or_too_wide_for_risk_cap,,,,,,,,,,,,,,,,,1,,,,0,,0,500,N,,,,example row - delete
