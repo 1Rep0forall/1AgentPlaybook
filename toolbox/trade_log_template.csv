@@ -1,0 +1,2 @@
+date,playbook_version,mode,or_high,or_low,or_width_pts,est_risk_usd,decision,no_trade_reason,direction,signal_bar_close,entry_time,entry_price,stop_price,target_price,exit_time,exit_price,exit_reason,contracts,commission_usd,net_usd,r_multiple,daily_pnl_usd,rule_violation,chart_screenshot_path,notes
+2026-11-23,v1.0,SIM,,,,,,,,,,,,,,,,1,,,,,N,,example row - delete
