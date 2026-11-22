@@ -115,6 +115,7 @@ The $150 stop was fixed in advance (D6) knowing that it may trigger on an ordina
 |---|---|---|
 | **Agent instructions** | `CLAUDE.md` | The one agent's operating loop and boundaries. |
 | **Rules / config** | `toolbox/backtest_config.json` | Every rule number. Never edit a frozen version; copy it to a new version (§5). |
+| **Dashboard** | `gui/server.py` (`python gui/server.py`) | Same status, rules and actions as the CLI in one local page, plus API-key storage. No rules or hold-out button in it. |
 | **Session tools** | `backtest/session_tools.py` | `rules` (today's numbers), `status` (GO/PAUSE/STOP/FIX-PROOF), `reconcile` (your log vs. the model for one session). |
 | **Trade log** | `toolbox/trade_log_template.csv` | Copy once to `logs/trade_log_<year>.csv`; one row per session, incl. no-trade days. Same column names as the backtest. |
 | **Session checklist** | `toolbox/session_checklist.md` | Copy to `logs/sessions/YYYY-MM-DD.md` each day and tick it. |

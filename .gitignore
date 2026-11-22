@@ -1,4 +1,12 @@
+# raw market data (large, licensed)
 data/
+# LOCAL SECRETS — never commit API keys
+config/
+.env
+.env.*
+*.local.json
+*.local.json.tmp
+# python
 __pycache__/
 *.pyc
 .pytest_cache/

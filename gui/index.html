@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MES ORB Dashboard</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #5d6673; --line: #e2e5ea;
+    --accent: #2f5fd0; --accent-text: #ffffff;
+    --ok: #1f8a4c; --ok-bg: #e5f5ec; --warn: #a15c00; --warn-bg: #fdf1df; --bad: #c0362c; --bad-bg: #fbe7e5;
+    --track: #e9ecf1; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #111418; --card: #1a1e24; --text: #e6e9ee; --muted: #9aa3ae; --line: #2b313a;
+      --accent: #6d95ff; --accent-text: #0d1117;
+      --ok: #4cc27f; --ok-bg: #173325; --warn: #e2a24a; --warn-bg: #3a2a12; --bad: #f07167; --bad-bg: #3d1c1a;
+      --track: #2a3038;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; justify-content: space-between;
+           padding: 16px; max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 18px; margin: 0; font-weight: 650; }
+  h1 small { color: var(--muted); font-weight: 400; }
+  main { max-width: 1100px; margin: 0 auto; padding: 0 16px 32px; display: grid; gap: 16px;
+         grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  @media (max-width: 760px) { main { grid-template-columns: minmax(0, 1fr); } }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; min-width: 0; }
+  .wide { grid-column: 1 / -1; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 0 0 12px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px;
+          font-size: 13px; border: 1px solid var(--line); color: var(--muted); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; flex: none; }
+  .ok { color: var(--ok); background: var(--ok-bg); border-color: transparent; }
+  .warn { color: var(--warn); background: var(--warn-bg); border-color: transparent; }
+  .bad { color: var(--bad); background: var(--bad-bg); border-color: transparent; }
+  .verdict { font-size: 28px; font-weight: 700; padding: 6px 16px; border-radius: 8px; display: inline-block; }
+  .reasons { margin: 10px 0 0; padding-left: 18px; color: var(--muted); font-size: 14px; }
+  .kv { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 14px 0 0; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; font-variant-numeric: tabular-nums; }
+  .meter { position: relative; height: 8px; background: var(--track); border-radius: 4px; margin: 6px 0 2px; }
+  .meter > span { position: absolute; inset: 0 auto 0 0; border-radius: 4px; background: var(--accent); }
+  .meter > i { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--warn); }
+  .meter-label { display: flex; justify-content: space-between; font-size: 12px; color: var(--muted); }
+  .rules { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 8px 14px; }
+  .rules dt { color: var(--muted); } .rules dd { margin: 0; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); min-width: 0; }
+  input, select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--line);
+                  border-radius: 6px; padding: 7px 9px; min-width: 0; width: 100%; }
+  button { font: inherit; border-radius: 6px; padding: 8px 14px; border: 1px solid var(--line);
+           background: var(--card); color: var(--text); cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: transparent; }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  .grid-inputs { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); margin: 12px 0; }
+  .note { font-size: 13px; color: var(--muted); margin: 8px 0 0; }
+  pre { margin: 10px 0 0; padding: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px;
+        font: 12.5px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 420px; overflow: auto; }
+  .provider { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 14px; }
+  .provider-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .provider-head h3 { margin: 0; font-size: 15px; }
+  .detail { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
+  .msg { font-size: 13px; margin-left: 4px; }
+  footer { max-width: 1100px; margin: 0 auto; padding: 0 16px 24px; color: var(--muted); font-size: 13px; }
+  @media (max-width: 520px) { .rules, .kv { grid-template-columns: 1fr; } .rules dt, .kv dt { margin-top: 6px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>MES ORB <small>· paper workflow</small></h1>
+  <div id="repo" class="row"></div>
+</header>
+
+<main>
+  <section class="card" aria-labelledby="h-status">
+    <h2 id="h-status">System status</h2>
+    <div id="verdict" class="verdict">…</div>
+    <ul id="reasons" class="reasons"></ul>
+    <dl class="kv">
+      <dt>Equity</dt><dd id="equity">–</dd>
+      <dt>Drawdown</dt>
+      <dd>
+        <div id="dd-text">–</div>
+        <div class="meter" aria-hidden="true"><span id="dd-bar"></span><i id="dd-pause"></i></div>
+        <div class="meter-label"><span>$0</span><span id="dd-scale"></span></div>
+      </dd>
+      <dt>Paper sessions</dt>
+      <dd><div id="sess-text">–</div><div class="meter" aria-hidden="true"><span id="sess-bar"></span></div></dd>
+      <dt>Paper trades</dt>
+      <dd><div id="trade-text">–</div><div class="meter" aria-hidden="true"><span id="trade-bar"></span></div></dd>
+      <dt>Rule violations</dt><dd id="viol">–</dd>
+    </dl>
+    <p class="note" id="logfile"></p>
+  </section>
+
+  <section class="card" aria-labelledby="h-rules">
+    <h2 id="h-rules">Today's session rules</h2>
+    <dl id="rules" class="rules"></dl>
+    <p class="note">From <code>toolbox/backtest_config.json</code> (frozen v1.1). Same as
+      <code>session_tools.py rules</code>.</p>
+  </section>
+
+  <section class="card wide" aria-labelledby="h-actions">
+    <h2 id="h-actions">Actions</h2>
+    <div class="row">
+      <button class="primary" data-action="status">Status check</button>
+      <button data-action="tests">Run unit tests</button>
+      <button data-action="dev_backtest">Run dev backtest</button>
+      <button data-action="reconcile">Reconcile session</button>
+    </div>
+    <div class="grid-inputs">
+      <label><span>Data file (in <code>data/</code>)</span><select id="data-file"></select></label>
+      <label>Timestamp timezone<select id="data-tz"></select></label>
+      <label>Bar timestamp marks<select id="bar-label">
+        <option value="start">bar start</option><option value="end">bar end</option></select></label>
+      <label>Session date (reconcile)<input id="rec-date" type="date"></label>
+    </div>
+    <p class="note">Dev backtest uses the frozen config and 2015–2021 only. The one-time hold-out run is
+      deliberately not available here; it stays a CLI action (Blueprint §2.3).</p>
+    <div class="row" style="margin-top:12px"><span id="job-chip" class="chip">No action run yet</span>
+      <code id="job-cmd" class="note"></code></div>
+    <pre id="job-out" hidden></pre>
+  </section>
+
+  <section class="card wide" aria-labelledby="h-api">
+    <h2 id="h-api">API settings</h2>
+    <div class="grid-inputs">
+      <label>Mode<select id="mode">
+        <option value="paper">Paper / Sandbox</option>
+        <option value="live" disabled>Live — locked until playbook §6 is met</option></select></label>
+    </div>
+    <p class="note" id="secrets-file"></p>
+
+    <div class="provider">
+      <div class="provider-head"><h3>Data provider</h3><span id="badge-data" class="chip bad"><span class="dot"></span>Not connected</span></div>
+      <div class="grid-inputs">
+        <label>API key<input id="data-key" type="password" autocomplete="off" spellcheck="false"></label>
+        <label>Test URL (an endpoint that requires auth)<input id="data-url" type="url" placeholder="https://api.example.com/v1/account" spellcheck="false"></label>
+      </div>
+      <div class="row"><button data-test="data">Test connection</button></div>
+      <p class="detail" id="detail-data"></p>
+    </div>
+
+    <div class="provider">
+      <div class="provider-head"><h3>Broker</h3><span id="badge-broker" class="chip bad"><span class="dot"></span>Not connected</span></div>
+      <div class="grid-inputs">
+        <label>API key<input id="broker-key" type="password" autocomplete="off" spellcheck="false"></label>
+        <label>API secret<input id="broker-secret" type="password" autocomplete="off" spellcheck="false"></label>
+        <label>Test URL (an endpoint that requires auth)<input id="broker-url" type="url" placeholder="https://paper-api.example.com/v1/account" spellcheck="false"></label>
+      </div>
+      <div class="row"><button data-test="broker">Test connection</button></div>
+      <p class="detail" id="detail-broker"></p>
+    </div>
+
+    <div class="row" style="margin-top:16px">
+      <button class="primary" id="save">Save</button>
+      <button id="clear">Clear all keys</button>
+      <span id="save-msg" class="msg" role="status"></span>
+    </div>
+    <p class="note">Leave a key field blank to keep the saved key. Keys are stored only in a git-ignored local file
+      and are never shown again; you'll see the last 4 characters. No order placement exists in this app.</p>
+  </section>
+</main>
+<footer>Paper trading only. Live trading is out of scope until playbook §6 is met. Not financial advice.</footer>
+
+<script>
+const TOKEN = "__ORB_TOKEN__";
+const $ = (id) => document.getElementById(id);
+let state = null;
+
+async function api(path, body) {
+  const opts = { headers: { "X-ORB-Token": TOKEN } };
+  if (body !== undefined) {
+    opts.method = "POST";
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, opts);
+  const data = await r.json().catch(() => ({ error: "bad response" }));
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+
+const money = (v) => (v === null || v === undefined) ? "–" : "$" + Number(v).toFixed(2);
+const pct = (n, d) => Math.max(0, Math.min(100, d ? (n / d) * 100 : 0)) + "%";
+
+function setChip(el, cls, text) {
+  el.className = "chip " + cls;
+  el.replaceChildren();
+  const dot = document.createElement("span"); dot.className = "dot";
+  el.append(dot, document.createTextNode(text));
+}
+
+function renderStatus(s) {
+  const cls = { GO: "ok", PAUSE: "warn", "FIX-PROOF": "warn", STOP: "bad", ERROR: "bad" }[s.verdict] || "";
+  $("verdict").className = "verdict " + cls;
+  $("verdict").textContent = s.verdict;
+  $("reasons").replaceChildren(...(s.reasons || []).concat(s.proof_gaps || []).map((t) => {
+    const li = document.createElement("li"); li.textContent = t; return li; }));
+  $("equity").textContent = `${money(s.equity_usd)} (start ${money(s.starting_capital)})`;
+  const dd = s.drawdown_usd ?? 0;
+  $("dd-text").textContent = `${money(dd)} — pause at ${money(s.pause_usd)}, stop at ${money(s.stop_usd)}`;
+  $("dd-bar").style.width = pct(dd, s.stop_usd);
+  $("dd-bar").style.background = dd >= s.stop_usd ? "var(--bad)" : dd >= s.pause_usd ? "var(--warn)" : "var(--accent)";
+  $("dd-pause").style.left = pct(s.pause_usd, s.stop_usd);
+  $("dd-scale").textContent = money(s.stop_usd) + " stop";
+  $("sess-text").textContent = `${s.sessions ?? 0} of ${s.gate.sessions} needed`;
+  $("sess-bar").style.width = pct(s.sessions ?? 0, s.gate.sessions);
+  $("trade-text").textContent = `${s.trades ?? 0} of ${s.gate.trades} needed`;
+  $("trade-bar").style.width = pct(s.trades ?? 0, s.gate.trades);
+  $("viol").textContent = s.rule_violations === null ? "–" :
+    (s.rule_violations === 0 ? "0" : `${s.rule_violations} (live needs zero, playbook §6)`);
+  $("logfile").textContent = "Trade log: " + s.log_file + (s.log_exists ? "" : " (not created yet)");
+}
+
+function renderRules(r) {
+  $("rules").replaceChildren(...r.plain.flatMap(([k, v]) => {
+    const dt = document.createElement("dt"); dt.textContent = k;
+    const dd = document.createElement("dd"); dd.textContent = v; return [dt, dd]; }));
+}
+
+function renderRepo(repo) {
+  const el = $("repo"); el.replaceChildren();
+  const frozen = document.createElement("span");
+  setChip(frozen, repo.frozen_tag_exists ? "ok" : "warn", repo.frozen_tag_exists ? "v1.1-frozen tag present" : "v1.1-frozen tag missing");
+  const tree = document.createElement("span");
+  setChip(tree, repo.dirty ? "warn" : "ok", (repo.commit || "no git") + (repo.dirty ? " · uncommitted changes" : " · clean"));
+  el.append(frozen, tree);
+}
+
+function fillSelect(sel, values, labels, keep) {
+  const prev = keep ? sel.value : null;
+  sel.replaceChildren(...values.map((v, i) => { const o = document.createElement("option");
+    o.value = v; o.textContent = labels ? labels[i] : v; return o; }));
+  if (prev && values.includes(prev)) sel.value = prev;
+}
+
+const CONN_TEXT = { CONNECTED: "Connected", NOT_CONFIGURED: "Not configured", AUTH_FAILED: "Auth failed",
+                    UNREACHABLE: "Unreachable", NOT_VERIFIED: "Not verified", ERROR: "Error" };
+
+function renderCreds(c, conn) {
+  $("mode").value = c.mode;
+  $("secrets-file").textContent = "Stored in: " + c.file + (c.updated_utc ? ` (saved ${c.updated_utc})` : " (nothing saved yet)");
+  const ph = (f) => f.set ? `saved ${f.hint}${f.from_env ? " (from environment variable)" : ""}` : "not set";
+  $("data-key").placeholder = ph(c.data.api_key);
+  $("broker-key").placeholder = ph(c.broker.api_key);
+  $("broker-secret").placeholder = ph(c.broker.api_secret);
+  if (document.activeElement !== $("data-url")) $("data-url").value = c.data.test_url;
+  if (document.activeElement !== $("broker-url")) $("broker-url").value = c.broker.test_url;
+  for (const t of ["data", "broker"]) {
+    const res = conn[t];
+    const configured = c[t].api_key.set;
+    if (res && res.connected) setChip($("badge-" + t), "ok", "Connected");
+    else setChip($("badge-" + t), "bad", "Not connected" + (res ? " · " + CONN_TEXT[res.state] : configured ? " · not tested yet" : " · not configured"));
+    $("detail-" + t).textContent = res ? `${res.detail} (tested ${res.tested_utc})` : "";
+  }
+}
+
+async function refresh() {
+  try {
+    state = await api("/api/state");
+  } catch (e) { $("verdict").textContent = "ERROR"; $("reasons").textContent = e.message; return; }
+  renderStatus(state.status); renderRules(state.rules); renderRepo(state.repo);
+  renderCreds(state.credentials, state.connection);
+  const files = state.data_files;
+  fillSelect($("data-file"), files.length ? files : [""], files.length ? null : ["No CSV files in data/ yet"], true);
+  fillSelect($("data-tz"), state.tz_choices, state.tz_choices.map((t) => t || "Timestamps include a UTC offset"), true);
+}
+
+function showJob(job) {
+  const cls = job.state === "running" ? "warn" : job.state === "done" ? "ok" : "bad";
+  const label = { status: "Status check", tests: "Unit tests", dev_backtest: "Dev backtest", reconcile: "Reconcile" }[job.name] || job.name;
+  const exit = job.returncode === null || job.returncode === undefined ? "" : ` (exit ${job.returncode})`;
+  setChip($("job-chip"), cls, `${label}: ${job.state}${exit}`);
+  $("job-cmd").textContent = job.command ? "$ " + job.command : "";
+  $("job-out").hidden = job.state === "running" && !job.output;
+  $("job-out").textContent = job.state === "running" ? "Running…" : (job.output || "(no output)");
+}
+
+function busy(on) { document.querySelectorAll("button[data-action]").forEach((b) => b.disabled = on); }
+
+async function runAction(name) {
+  const params = { data_file: $("data-file").value, data_tz: $("data-tz").value,
+                   bar_label: $("bar-label").value, date: $("rec-date").value };
+  busy(true);
+  try {
+    let job = await api("/api/actions/" + name, params);
+    showJob(job);
+    while (job.state === "running") {
+      await new Promise((r) => setTimeout(r, 1000));
+      job = await api("/api/jobs/" + job.id);
+      showJob(job);
+    }
+  } catch (e) {
+    setChip($("job-chip"), "bad", "Not started");
+    $("job-cmd").textContent = ""; $("job-out").hidden = false; $("job-out").textContent = e.message;
+  } finally { busy(false); refresh(); }
+}
+
+async function save() {
+  const body = { mode: $("mode").value,
+    data: { api_key: $("data-key").value, test_url: $("data-url").value },
+    broker: { api_key: $("broker-key").value, api_secret: $("broker-secret").value, test_url: $("broker-url").value } };
+  try {
+    await api("/api/credentials", body);
+    ["data-key", "broker-key", "broker-secret"].forEach((id) => $(id).value = "");
+    $("save-msg").textContent = "Saved locally.";
+  } catch (e) { $("save-msg").textContent = "Not saved: " + e.message; }
+  refresh();
+}
+
+async function clearKeys() {
+  if (!confirm("Remove all saved API keys and test URLs from this computer?")) return;
+  try { await api("/api/credentials/clear", {}); $("save-msg").textContent = "All keys cleared."; }
+  catch (e) { $("save-msg").textContent = "Not cleared: " + e.message; }
+  refresh();
+}
+
+async function testConn(target) {
+  setChip($("badge-" + target), "warn", "Testing…");
+  try { await api("/api/connection/test", { target }); }
+  catch (e) { $("detail-" + target).textContent = e.message; }
+  refresh();
+}
+
+document.querySelectorAll("button[data-action]").forEach((b) => b.addEventListener("click", () => runAction(b.dataset.action)));
+document.querySelectorAll("button[data-test]").forEach((b) => b.addEventListener("click", () => testConn(b.dataset.test)));
+$("save").addEventListener("click", save);
+$("clear").addEventListener("click", clearKeys);
+$("rec-date").valueAsDate = new Date();
+refresh();
+</script>
+</body>
+</html>

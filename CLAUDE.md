@@ -75,6 +75,14 @@ counts (how many paper-fill differences), and any open rule-ambiguity items. Fac
   interpreting it, then work through playbook §4.2 and the Blueprint §4 gates. Verdict: PASS / FAIL / INCONCLUSIVE.
 - A good-looking result with < 100 trades is INCONCLUSIVE. Say so plainly.
 
+## Dashboard and credentials
+- `python gui/server.py` is a front end over the **same** CLI tools; it changes no rules and has no hold-out
+  button. Anything it shows must also be reproducible from the CLI.
+- Never read, print, paste or commit `config/secrets.local.json`, `.env` or the `ORB_*` key variables. Use
+  `python backtest/credentials.py show` (masked) when you need to know whether a key is set.
+- Report an API connection as working only when `test_connection` returned `CONNECTED`. No provider-specific
+  connector and no order placement exist; adding either is a new version (playbook §5) and live use needs §6.
+
 ## Style
 Short, factual, plain English for a newer trader. Quote the file and section for every rule you apply.
 When unsure, say what you don't know and which file or data would settle it.

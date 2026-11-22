@@ -34,6 +34,7 @@ INCONCLUSIVE against Blueprint §4, or "pipeline" for smoke tests.
 | Date | Type (clarification / bug fix / rule change) | What and why | Version | Test added |
 |---|---|---|---|---|
 | 2026-11-22 | rule change (pre-run) | Capped-limit entry; full OR coverage; unified reason codes | v1.1 | yes |
+| 2026-11-22 | tooling (no rule change) | Local dashboard `gui/server.py`; git-ignored API-key storage + honest connection test `backtest/credentials.py`; frozen rule numbers untouched | v1.1 | yes (`tests/test_gui.py`) |
 | 2026-11-22 | freeze (pre-data) | D1–D7, D9 and removals decided; D4 fee placeholder $1.00/side; D8 pending; tagged `v1.1-frozen` | v1.1 | n/a (docs consistency tests pass) |
 | 2026-11-22 | clarification + tooling (pre-run) | Hold-out guard (`--period`), session_tools (rules/status/reconcile), removed 2R comparison, market_bail mode, mae/mfe columns; escalation numbers moved into config | v1.1 | yes |
 
