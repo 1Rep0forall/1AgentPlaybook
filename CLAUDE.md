@@ -47,7 +47,8 @@ If these disagree with each other or with this file, stop and report the conflic
   and record it as a rule-ambiguity candidate for step D. Never improvise a rule mid-session.
 
 ### C. Post-session Proof (playbook §4.1)
-1. Fill the log row in `logs/trade_log_<year>.csv` using only playbook §2.2 reason codes.
+1. Add the log row with `python backtest/session_tools.py log ...` (or the dashboard's *Log a session*), never by
+   hand-editing the CSV: it derives every rule number from the config and flags rule breaks. Only playbook §2.2 codes.
 2. With today's 1-min bars exported to `data/`:
    `python backtest/session_tools.py reconcile --log logs/trade_log_<year>.csv --bars <file> --data-tz <tz> --date YYYY-MM-DD`
    Write `reconcile_verdict` and `model_net_usd` into the row.
@@ -72,7 +73,8 @@ counts (how many paper-fill differences), and any open rule-ambiguity items. Fac
 ## Backtest runs
 - Dev: `python backtest/orb_backtest.py --period dev --data <file> --data-tz <tz> --config toolbox/backtest_config.json`
 - Before any run: tests pass, worktree committed. After: record the run in `backtest_notes.md` **before**
-  interpreting it, then work through playbook §4.2 and the Blueprint §4 gates. Verdict: PASS / FAIL / INCONCLUSIVE.
+  interpreting it, then work through playbook §4.2 and evaluate the gates with
+  `python backtest/gates.py --dev <run> [--holdout <run>]`. Verdict: PASS / FAIL / INCONCLUSIVE; gate 7 is manual.
 - A good-looking result with < 100 trades is INCONCLUSIVE. Say so plainly.
 
 ## Dashboard and credentials

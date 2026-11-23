@@ -71,6 +71,14 @@
   .provider-head h3 { margin: 0; font-size: 15px; }
   .detail { font-size: 13px; color: var(--muted); margin: 6px 0 0; }
   .msg { font-size: 13px; margin-left: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13.5px; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; }
+  .table-wrap { overflow-x: auto; margin-top: 4px; }
+  .flags { margin: 10px 0 0; padding-left: 18px; font-size: 14px; }
+  .flags li.v { color: var(--bad); } .flags li.c { color: var(--warn); }
+  .verdict-line { margin: 12px 0 0; font-weight: 650; }
+  [hidden] { display: none !important; }
   footer { max-width: 1100px; margin: 0 auto; padding: 0 16px 24px; color: var(--muted); font-size: 13px; }
   @media (max-width: 520px) { .rules, .kv { grid-template-columns: 1fr; } .rules dt, .kv dt { margin-top: 6px; } }
 </style>
@@ -113,6 +121,42 @@
       <code>session_tools.py rules</code>.</p>
   </section>
 
+  <section class="card wide" aria-labelledby="h-log">
+    <h2 id="h-log">Log a session</h2>
+    <p class="note" style="margin-top:0">Enter what happened. Stop, limit, target, risk, net and R are worked out from the
+      frozen config; rule breaks are flagged and set <code>rule_violation = Y</code>. Press <b>Check</b> first, then <b>Save</b>.</p>
+    <div class="grid-inputs">
+      <label>Session date<input id="lg-date" type="date"></label>
+      <label>What happened<select id="lg-traded">
+        <option value="false">No trade</option><option value="true">Traded</option></select></label>
+      <label>OR High<input id="lg-hi" inputmode="decimal" placeholder="e.g. 5012.25"></label>
+      <label>OR Low<input id="lg-lo" inputmode="decimal" placeholder="e.g. 5010.00"></label>
+    </div>
+    <div id="lg-notrade" class="grid-inputs"><label>No-trade reason (playbook §2.2)<select id="lg-reason"></select></label></div>
+    <div id="lg-trade" class="grid-inputs" hidden>
+      <label>Direction<select id="lg-dir"><option value="long">Long</option><option value="short">Short</option></select></label>
+      <label>Signal bar close (ET)<input id="lg-sig" type="time" step="300"></label>
+      <label>Entry time (ET)<input id="lg-tin" type="time"></label>
+      <label>Entry fill price<input id="lg-pin" inputmode="decimal"></label>
+      <label>Exit time (ET)<input id="lg-tout" type="time"></label>
+      <label>Exit fill price<input id="lg-pout" inputmode="decimal"></label>
+      <label>Exit reason<select id="lg-exit"></select></label>
+      <label>Chart screenshot path<input id="lg-chart" placeholder="logs/charts/YYYY-MM-DD.png"></label>
+    </div>
+    <div class="grid-inputs">
+      <label>Rule broken? (your own judgement)<select id="lg-rv"><option value="N">No</option><option value="Y">Yes</option></select></label>
+      <label>Event tags<input id="lg-tags" placeholder="e.g. CPI"></label>
+      <label>Notes<input id="lg-notes"></label>
+    </div>
+    <div class="row">
+      <button id="lg-check">Check</button>
+      <button class="primary" id="lg-save" disabled>Save to log</button>
+      <span id="lg-msg" class="msg" role="status"></span>
+    </div>
+    <ul id="lg-flags" class="flags"></ul>
+    <div id="lg-preview" class="table-wrap"></div>
+  </section>
+
   <section class="card wide" aria-labelledby="h-actions">
     <h2 id="h-actions">Actions</h2>
     <div class="row">
@@ -133,6 +177,17 @@
     <div class="row" style="margin-top:12px"><span id="job-chip" class="chip">No action run yet</span>
       <code id="job-cmd" class="note"></code></div>
     <pre id="job-out" hidden></pre>
+  </section>
+
+  <section class="card wide" aria-labelledby="h-results">
+    <h2 id="h-results">Backtest results</h2>
+    <div id="runs" class="table-wrap"></div>
+    <div class="grid-inputs">
+      <label>Dev run<select id="gt-dev"></select></label>
+      <label>Hold-out run (for the final verdict)<select id="gt-ho"></select></label>
+    </div>
+    <div class="row"><button id="gt-eval">Evaluate gates (Blueprint §4)</button></div>
+    <div id="gt-out"></div>
   </section>
 
   <section class="card wide" aria-labelledby="h-api">
@@ -278,6 +333,8 @@ async function refresh() {
   const files = state.data_files;
   fillSelect($("data-file"), files.length ? files : [""], files.length ? null : ["No CSV files in data/ yet"], true);
   fillSelect($("data-tz"), state.tz_choices, state.tz_choices.map((t) => t || "Timestamps include a UTC offset"), true);
+  fillLogSelects();
+  renderRuns(state.runs);
 }
 
 function showJob(job) {
@@ -289,6 +346,97 @@ function showJob(job) {
   $("job-out").hidden = job.state === "running" && !job.output;
   $("job-out").textContent = job.state === "running" ? "Running…" : (job.output || "(no output)");
 }
+
+// ---------------------------------------------------------------- tables
+function table(headers, rows) {
+  const t = document.createElement("table");
+  const hr = document.createElement("tr");
+  headers.forEach((h) => { const th = document.createElement("th"); th.textContent = h; hr.append(th); });
+  const thead = document.createElement("thead"); thead.append(hr);
+  const tbody = document.createElement("tbody");
+  rows.forEach((r) => { const tr = document.createElement("tr");
+    r.forEach((c) => { const td = document.createElement("td"); td.textContent = c ?? "–"; tr.append(td); });
+    tbody.append(tr); });
+  t.append(thead, tbody); return t;
+}
+
+// ---------------------------------------------------------------- session log
+let reasonsFilled = false;
+function fillLogSelects() {
+  if (reasonsFilled || !state) return;
+  const codes = Object.keys(state.reason_codes);
+  fillSelect($("lg-reason"), codes, codes.map((c) => `${c} — ${state.reason_codes[c]}`));
+  fillSelect($("lg-exit"), state.exit_reasons);
+  reasonsFilled = true;
+}
+function logFields() {
+  return { date: $("lg-date").value, traded: $("lg-traded").value === "true",
+    or_high: $("lg-hi").value.trim(), or_low: $("lg-lo").value.trim(), no_trade_reason: $("lg-reason").value,
+    direction: $("lg-dir").value, signal_bar_close: $("lg-sig").value, entry_time: $("lg-tin").value,
+    entry_price: $("lg-pin").value.trim(), exit_time: $("lg-tout").value, exit_price: $("lg-pout").value.trim(),
+    exit_reason: $("lg-exit").value, chart_screenshot_path: $("lg-chart").value.trim(),
+    rule_violation: $("lg-rv").value, event_tags: $("lg-tags").value.trim(), notes: $("lg-notes").value.trim() };
+}
+const SHOW = ["date", "traded", "no_trade_reason", "or_width_pts", "min_risk_usd", "direction", "entry_limit_price",
+  "entry_price", "stop_price", "target_price", "risk_usd", "exit_price", "exit_reason", "net_usd", "r_multiple",
+  "equity_usd", "rule_violation"];
+async function submitLog(dry) {
+  $("lg-msg").textContent = "";
+  try {
+    const r = await api("/api/log", { ...logFields(), dry_run: dry });
+    $("lg-flags").replaceChildren(...r.violations.map((t) => { const li = document.createElement("li");
+      li.className = "v"; li.textContent = "Rule violation: " + t; return li; }),
+      ...r.checks.map((t) => { const li = document.createElement("li"); li.className = "c";
+      li.textContent = "Check: " + t; return li; }));
+    const keys = SHOW.filter((k) => k in r.row);
+    $("lg-preview").replaceChildren(table(keys, [keys.map((k) => r.row[k])]));
+    $("lg-msg").textContent = r.saved ? "Saved to " + r.log_file : "Looks valid. Review it, then Save.";
+    $("lg-save").disabled = r.saved;
+    if (r.saved) refresh();
+  } catch (e) {
+    $("lg-msg").textContent = (dry ? "Not valid: " : "Not saved: ") + e.message;
+    $("lg-save").disabled = true;
+    $("lg-flags").replaceChildren(); $("lg-preview").replaceChildren();
+  }
+}
+$("lg-traded").addEventListener("change", () => {
+  const t = $("lg-traded").value === "true";
+  $("lg-trade").hidden = !t; $("lg-notrade").hidden = t;
+});
+document.querySelectorAll("#h-log ~ * input, #h-log ~ * select").forEach((el) =>
+  el.addEventListener("input", () => { $("lg-save").disabled = true; }));
+$("lg-check").addEventListener("click", () => submitLog(true));
+$("lg-save").addEventListener("click", () => submitLog(false));
+$("lg-date").valueAsDate = new Date();
+
+// ---------------------------------------------------------------- results + gates
+function renderRuns(runs) {
+  if (!runs.length) {
+    const p = document.createElement("p"); p.className = "note";
+    p.textContent = "No backtest runs in results/ yet."; $("runs").replaceChildren(p);
+  } else {
+    $("runs").replaceChildren(table(["run", "period", "trades", "net $", "PF", "exp R", "max DD $", "committed", "warnings"],
+      runs.map((r) => [r.run_id, r.period, r.trades, r.net_pnl_usd, r.profit_factor ?? "n/a", r.expectancy_r,
+        r.max_drawdown_usd, r.clean_commit ? "yes" : "NO", r.warnings])));
+  }
+  const dev = runs.filter((r) => r.period === "dev").map((r) => r.run_id);
+  const ho = runs.filter((r) => r.period === "holdout").map((r) => r.run_id);
+  fillSelect($("gt-dev"), dev.length ? dev : [""], dev.length ? null : ["no dev runs yet"], true);
+  fillSelect($("gt-ho"), [""].concat(ho), ["none (dev check only)"].concat(ho), true);
+  $("gt-eval").disabled = !dev.length;
+}
+async function evalGates() {
+  try {
+    const r = await api("/api/gates", { dev: $("gt-dev").value, holdout: $("gt-ho").value });
+    const v = document.createElement("p"); v.className = "verdict-line"; v.textContent = "Verdict: " + r.verdict;
+    const notes = document.createElement("ul"); notes.className = "flags";
+    r.notes.forEach((n) => { const li = document.createElement("li"); li.className = "c"; li.textContent = n; notes.append(li); });
+    const wrap = document.createElement("div"); wrap.className = "table-wrap";
+    wrap.append(table(["gate", "status", "check", "detail"], r.gates.map((g) => [g.gate, g.status, g.name, g.detail])));
+    $("gt-out").replaceChildren(v, wrap, notes);
+  } catch (e) { const p = document.createElement("p"); p.className = "note"; p.textContent = e.message; $("gt-out").replaceChildren(p); }
+}
+$("gt-eval").addEventListener("click", evalGates);
 
 function busy(on) { document.querySelectorAll("button[data-action]").forEach((b) => b.disabled = on); }
 

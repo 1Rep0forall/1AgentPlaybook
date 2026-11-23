@@ -1,0 +1,6 @@
+# Runtime
+pandas>=2.2
+numpy>=1.26
+# Tests
+pytest>=7
+# Optional: matplotlib (equity chart in backtest results)

@@ -34,9 +34,16 @@ INCONCLUSIVE against Blueprint §4, or "pipeline" for smoke tests.
 | Date | Type (clarification / bug fix / rule change) | What and why | Version | Test added |
 |---|---|---|---|---|
 | 2026-11-22 | rule change (pre-run) | Capped-limit entry; full OR coverage; unified reason codes | v1.1 | yes |
+| 2026-11-23 | tooling (no rule change) | `session_tools.py log` + dashboard *Log a session* (validated rows, auto rule-break flags); `backtest/gates.py` + dashboard results/gates panel; requirements.txt; CI test workflow | v1.1 | yes (`tests/test_gates_and_log.py`) |
 | 2026-11-22 | tooling (no rule change) | Local dashboard `gui/server.py`; git-ignored API-key storage + honest connection test `backtest/credentials.py`; frozen rule numbers untouched | v1.1 | yes (`tests/test_gui.py`) |
 | 2026-11-22 | freeze (pre-data) | D1–D7, D9 and removals decided; D4 fee placeholder $1.00/side; D8 pending; tagged `v1.1-frozen` | v1.1 | n/a (docs consistency tests pass) |
 | 2026-11-22 | clarification + tooling (pre-run) | Hold-out guard (`--period`), session_tools (rules/status/reconcile), removed 2R comparison, market_bail mode, mae/mfe columns; escalation numbers moved into config | v1.1 | yes |
+
+## Open rule-ambiguity items (playbook §5, CLAUDE.md step D)
+
+| Found | Item | Proposed type | Status |
+|---|---|---|---|
+| 2026-11-23 | Blueprint §2.3 says a dev run can be "INCONCLUSIVE (too few trades)", but §4 / D5 only set minimums for the hold-out (≥ 30) and the total (≥ 100). `gates.py` reports dev gates 1–3 and the dev trade count and does not invent a dev minimum. Decide before the first real dev run, e.g. "dev ≥ 70 so that dev + hold-out can reach 100". | clarification (pre-data) | open |
 
 ## Pause reviews (playbook §2.3)
 

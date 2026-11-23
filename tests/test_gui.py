@@ -148,7 +148,8 @@ def test_connection_states_are_honest(fake_api):
 # ------------------------------------------------------------------ GUI server
 @pytest.fixture
 def dash(tmp_path, secrets_file):
-    srv, app = gui.make_server(0, log_path=tmp_path / "trade_log.csv", data_dir=tmp_path / "data")
+    srv, app = gui.make_server(0, log_path=tmp_path / "trade_log.csv", data_dir=tmp_path / "data",
+                               results_dir=tmp_path / "results")
     srv.quiet = True
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     yield app, tmp_path
@@ -251,3 +252,28 @@ def test_paper_gate_matches_playbook():
     text = (ROOT / "playbook" / "MES_ORB_Playbook_v1.md").read_text()
     assert (f"≥ {gui.PAPER_GATE['sessions']} paper sessions and ≥ {gui.PAPER_GATE['trades']} paper trades"
             in text)
+
+
+def test_log_session_check_then_save(dash):
+    app, tmp = dash
+    trade = {"date": "2026-11-17", "traded": True, "or_high": "5012.25", "or_low": "5010", "direction": "long",
+             "signal_bar_close": "09:55", "entry_time": "09:55", "entry_price": "5012.75", "exit_time": "10:40",
+             "exit_price": "5017", "exit_reason": "target", "chart_screenshot_path": "logs/charts/x.png"}
+    code, raw = call(app, "POST", "/api/log", {**trade, "dry_run": True})
+    r = json.loads(raw)
+    assert code == 200 and not r["saved"] and r["row"]["target_price"] == "5017" and not (tmp / "trade_log.csv").exists()
+    code, raw = call(app, "POST", "/api/log", {**trade, "dry_run": False})
+    assert code == 200 and json.loads(raw)["saved"] and (tmp / "trade_log.csv").exists()
+    code, raw = call(app, "POST", "/api/log", {**trade, "dry_run": False})
+    assert code == 400 and "already in the log" in json.loads(raw)["error"]
+    assert call(app, "POST", "/api/log", {**trade, "date": "2026-11-18", "mode": "LIVE"})[0] == 400
+    s = json.loads(call(app, "GET", "/api/state")[1])
+    assert s["status"]["sessions"] == 1 and s["status"]["equity_usd"] == 519.25
+    assert "contract_roll_in_session" not in s["reason_codes"]
+
+
+def test_gates_endpoint_only_accepts_listed_runs(dash):
+    app, tmp = dash
+    assert call(app, "POST", "/api/gates", {"dev": "../../etc"})[0] == 400
+    s = json.loads(call(app, "GET", "/api/state")[1])
+    assert s["runs"] == []

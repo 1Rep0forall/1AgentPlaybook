@@ -38,6 +38,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backtest"))
 import credentials as cr  # noqa: E402
+import gates as gt  # noqa: E402
 import orb_backtest as ob  # noqa: E402
 import session_tools as st  # noqa: E402
 
@@ -65,8 +66,10 @@ def git(*args) -> str:
 
 
 class App:
-    def __init__(self, port: int, log_path: Optional[Path] = None, data_dir: Optional[Path] = None):
+    def __init__(self, port: int, log_path: Optional[Path] = None, data_dir: Optional[Path] = None,
+                 results_dir: Optional[Path] = None):
         self.port = port
+        self.results_dir = results_dir or ROOT / "results"
         self.token = secrets.token_urlsafe(24)
         self.log_path_override = log_path
         self.data_dir = data_dir or ROOT / "data"
@@ -142,6 +145,9 @@ class App:
             "credentials": cr.masked(cr.load_credentials()),
             "connection": self.connection,
             "data_files": self.data_files(),
+            "runs": gt.list_runs(self.results_dir),
+            "reason_codes": st.LOGGABLE_REASONS,
+            "exit_reasons": list(st.EXIT_REASONS),
             "tz_choices": TZ_CHOICES,
             "jobs": [self.public_job(j) for j in list(self.jobs.values())[-5:]],
         }
@@ -190,6 +196,35 @@ class App:
             return str(Path(a).relative_to(ROOT))
         except ValueError:
             return a
+
+    # ------------------------------------------------------------------ session log + gates
+    def log_session(self, data: dict) -> dict:
+        cfg = ob.load_config(str(CONFIG))
+        dry = bool(data.pop("dry_run", True))
+        path = self.log_path()
+        try:
+            res = st.build_log_row(data, cfg, st.read_log(path))
+            if not dry:
+                st.append_log_row(path, res["row"])
+        except st.LogError as e:
+            raise ApiError(400, str(e))
+        return {"saved": not dry, "log_file": str(path), "row": {k: v for k, v in res["row"].items() if v != ""},
+                "violations": res["violations"], "checks": res["checks"]}
+
+    def evaluate_gates(self, data: dict) -> dict:
+        runs = {r["run_id"]: r for r in gt.list_runs(self.results_dir)}
+
+        def pick(key, period, required):
+            rid = data.get(key) or ""
+            if not rid and not required:
+                return None
+            if rid not in runs or runs[rid]["period"] != period:
+                raise ApiError(400, f"pick a {period} run from the results list")
+            return runs[rid]["path"]
+        try:
+            return gt.evaluate(pick("dev", "dev", True), pick("holdout", "holdout", False))
+        except gt.RunError as e:
+            raise ApiError(400, str(e))
 
     # ------------------------------------------------------------------ validation
     def pick_data_file(self, name) -> Path:
@@ -324,6 +359,10 @@ def make_handler(app: App):
                 if self.path == "/api/credentials/clear":
                     app.connection.clear()
                     return self.json(200, {"credentials": cr.clear_credentials()})
+                if self.path == "/api/log":
+                    return self.json(200, app.log_session(data))
+                if self.path == "/api/gates":
+                    return self.json(200, app.evaluate_gates(data))
                 if self.path == "/api/connection/test":
                     res = cr.test_connection(str(data.get("target", "")))
                     app.connection[res["target"]] = res

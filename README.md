@@ -18,7 +18,8 @@ Breakout on Micro E-mini S&P 500 futures (MES), built on the
 | Trade log template / session checklist | `toolbox/trade_log_template.csv`, `toolbox/session_checklist.md` |
 | Run registry, change log, pause reviews | `toolbox/backtest_notes.md` |
 | Backtest engine | `backtest/orb_backtest.py` |
-| Session tools: `rules`, `status`, `reconcile` | `backtest/session_tools.py` |
+| Session tools: `rules`, `status`, `log`, `reconcile` | `backtest/session_tools.py` |
+| Blueprint §4 gate evaluator | `backtest/gates.py` |
 | Local dashboard (GUI) | `gui/server.py`, `gui/index.html` |
 | Local API-key storage + connection test | `backtest/credentials.py` |
 | Synthetic smoke-test data | `backtest/make_synthetic_data.py` |
@@ -35,6 +36,10 @@ Standard library only; it listens on 127.0.0.1 and nothing else.
 - **System status:** GO / PAUSE / STOP / FIX-PROOF from your paper log (`logs/trade_log_<year>.csv`), equity and
   drawdown against the $100 pause and $150 stop, and progress toward the 40-session / 15-trade paper gate.
 - **Today's session rules:** the same numbers as `session_tools.py rules`, taken from the frozen config.
+- **Log a session:** enter what happened (range, or fills and times); stop, limit, target, risk, net and R are
+  computed from the frozen config, rule breaks are flagged and set `rule_violation = Y`. *Check* first, then *Save*.
+- **Backtest results:** every run in `results/` with its key numbers, and a gate evaluator (Blueprint §4) that gives
+  the dev check or the final PASS / FAIL / INCONCLUSIVE verdict.
 - **Actions:** Status check, Run unit tests, Run dev backtest (2015–2021 only), Reconcile session. Each runs the
   same CLI script and shows its output. There is **no hold-out button**: that one-time run stays a CLI action.
 - **API settings:** data-provider and broker keys go to `config/secrets.local.json` (git-ignored, file mode 0600)
@@ -49,7 +54,7 @@ Standard library only; it listens on 127.0.0.1 and nothing else.
 
 ## Quick start (CLI)
 ```bash
-pip install pandas numpy pytest     # matplotlib optional (equity chart)
+pip install -r requirements.txt     # pandas, numpy, pytest (Python 3.10+; matplotlib optional)
 python -m pytest tests/ -q
 python backtest/session_tools.py rules
 ```
@@ -57,6 +62,14 @@ Smoke test (synthetic data, 2016–2017, inside the dev period; results mean not
 ```bash
 python backtest/make_synthetic_data.py --daily-vol 0.0012 --out data/synthetic_quiet.csv
 python backtest/orb_backtest.py --period dev --data data/synthetic_quiet.csv --out /tmp/orb_smoke
+```
+Log a paper session from the CLI (same validation as the dashboard; `--dry-run` to check first):
+```bash
+python backtest/session_tools.py log --log logs/trade_log_2026.csv --date 2026-11-23 --or-high 5012.25 --or-low 5005 --no-trade or_too_wide_for_risk_cap
+```
+Judge a run against the Blueprint §4 gates:
+```bash
+python backtest/gates.py --dev results/<dev_run_id>
 ```
 Real data (fill in the D8 data spec first; example: naive Central-Time 1-min ES bars stamped at bar start):
 ```bash
