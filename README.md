@@ -29,6 +29,7 @@ Breakout on Micro E-mini S&P 500 futures (MES), built on the
 python gui/server.py
 ```
 Then open http://127.0.0.1:8765 (add `--open` to open the browser automatically, `--port N` to change the port).
+It opens in dark mode; the button at the top right switches to light and the choice is remembered in that browser.
 Standard library only; it listens on 127.0.0.1 and nothing else.
 
 - **System status:** GO / PAUSE / STOP / FIX-PROOF from your paper log (`logs/trade_log_<year>.csv`), equity and

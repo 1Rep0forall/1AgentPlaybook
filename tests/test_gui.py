@@ -179,6 +179,12 @@ def test_page_and_api_guards(dash):
     assert call(app, "POST", "/api/credentials", {"mode": "paper"}, ctype="text/plain")[0] == 415
 
 
+def test_page_defaults_to_dark_with_a_theme_switch(dash):
+    app, _ = dash
+    html = call(app, "GET", "/", token=False)[1]
+    assert '<html lang="en" data-theme="dark">' in html and 'id="theme-toggle"' in html
+
+
 def test_state_shows_config_derived_rules_and_no_log_yet(dash):
     app, _ = dash
     code, raw = call(app, "GET", "/api/state")

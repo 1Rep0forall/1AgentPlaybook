@@ -1,24 +1,30 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>MES ORB Dashboard</title>
+<script>
+  // Apply the saved theme before first paint (dark by default).
+  try { if (localStorage.getItem("orb-theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
+</script>
 <style>
   :root {
     --bg: #f6f7f9; --card: #ffffff; --text: #1b1f24; --muted: #5d6673; --line: #e2e5ea;
     --accent: #2f5fd0; --accent-text: #ffffff;
     --ok: #1f8a4c; --ok-bg: #e5f5ec; --warn: #a15c00; --warn-bg: #fdf1df; --bad: #c0362c; --bad-bg: #fbe7e5;
     --track: #e9ecf1; --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    color-scheme: light;
   }
-  @media (prefers-color-scheme: dark) {
-    :root:not([data-theme="light"]) {
-      --bg: #111418; --card: #1a1e24; --text: #e6e9ee; --muted: #9aa3ae; --line: #2b313a;
-      --accent: #6d95ff; --accent-text: #0d1117;
-      --ok: #4cc27f; --ok-bg: #173325; --warn: #e2a24a; --warn-bg: #3a2a12; --bad: #f07167; --bad-bg: #3d1c1a;
-      --track: #2a3038;
-    }
+  :root[data-theme="dark"] {
+    --bg: #111418; --card: #1a1e24; --text: #e6e9ee; --muted: #9aa3ae; --line: #2b313a;
+    --accent: #6d95ff; --accent-text: #0d1117;
+    --ok: #4cc27f; --ok-bg: #173325; --warn: #e2a24a; --warn-bg: #3a2a12; --bad: #f07167; --bad-bg: #3d1c1a;
+    --track: #2a3038;
+    color-scheme: dark;
   }
+  .header-right { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  #theme-toggle { padding: 4px 12px; border-radius: 999px; font-size: 13px; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text);
          font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
@@ -72,7 +78,10 @@
 <body>
 <header>
   <h1>MES ORB <small>· paper workflow</small></h1>
-  <div id="repo" class="row"></div>
+  <div class="header-right">
+    <div id="repo" class="row"></div>
+    <button id="theme-toggle" type="button" aria-label="Switch colour theme"></button>
+  </div>
 </header>
 
 <main>
@@ -332,6 +341,19 @@ document.querySelectorAll("button[data-test]").forEach((b) => b.addEventListener
 $("save").addEventListener("click", save);
 $("clear").addEventListener("click", clearKeys);
 $("rec-date").valueAsDate = new Date();
+
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme;
+  const dark = theme === "dark";
+  $("theme-toggle").textContent = dark ? "☀ Light mode" : "☾ Dark mode";
+  $("theme-toggle").setAttribute("aria-pressed", String(dark));
+}
+$("theme-toggle").addEventListener("click", () => {
+  const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+  applyTheme(next);
+  try { localStorage.setItem("orb-theme", next); } catch (e) {}
+});
+applyTheme(document.documentElement.dataset.theme || "dark");
 refresh();
 </script>
 </body>
