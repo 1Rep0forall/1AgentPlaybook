@@ -25,6 +25,7 @@ import orb_backtest as ob  # noqa: E402
 
 # Blueprint §4 (D5 + pre-registered gates). Change only with a new version (playbook §5).
 MIN_TOTAL_TRADES = 100
+MIN_DEV_TRADES = 70             # dev 2015-2021 (decided 2026-11-23, before any real data)
 MIN_HOLDOUT_TRADES = 30
 MIN_PROFIT_FACTOR = 1.15
 MAX_YEAR_SHARE = 0.50          # no single year > 50% of net profit
@@ -126,11 +127,15 @@ def evaluate(dev_path, holdout_path=None) -> dict:
     core_fail = any(g["status"] == "FAIL" for g in gates if g["gate"] in (1, 2, 3))
     core_missing = any(g["status"] == "MISSING" for g in gates if g["gate"] in (1, 2, 3))
 
+    n_dev = dev["summary"].get("trades", 0)
+    g4_dev = gate(4, f"dev: ≥ {MIN_DEV_TRADES} trades", "PASS" if n_dev >= MIN_DEV_TRADES else "FAIL",
+                  f"{n_dev} trades in the dev period")
     if not holdout_path:
-        n = dev["summary"].get("trades", 0)
-        notes.append("The Blueprint sets trade minimums for the hold-out (≥ 30) and the total (≥ 100) but not "
-                     f"for dev alone. Dev has {n} trades; whether that is 'too few' is your call to record.")
-        if core_fail:
+        gates = [g4_dev] + gates
+        if g4_dev["status"] != "PASS":      # gate 4 first (Blueprint §4)
+            verdict = (f"DEV INCONCLUSIVE — too few trades (< {MIN_DEV_TRADES}); the hold-out may still be run "
+                       "once, but expect INCONCLUSIVE overall (Blueprint §2.3)")
+        elif core_fail:
             verdict = "DEV FAIL — stop; do not run the hold-out (Blueprint §2.3)"
         elif core_missing:
             verdict = "DEV INCOMPLETE — re-run with sensitivity before judging"
@@ -141,9 +146,10 @@ def evaluate(dev_path, holdout_path=None) -> dict:
     ho = runs[1]
     total = dev["summary"].get("trades", 0) + ho["summary"].get("trades", 0)
     n_ho = ho["summary"].get("trades", 0)
-    g4 = gate(4, f"enough trades: ≥ {MIN_TOTAL_TRADES} total and ≥ {MIN_HOLDOUT_TRADES} in the hold-out",
-              "PASS" if total >= MIN_TOTAL_TRADES and n_ho >= MIN_HOLDOUT_TRADES else "FAIL",
-              f"{total} total, {n_ho} in the hold-out")
+    g4 = gate(4, f"enough trades: ≥ {MIN_DEV_TRADES} dev, ≥ {MIN_HOLDOUT_TRADES} hold-out, ≥ {MIN_TOTAL_TRADES} total",
+              "PASS" if (n_dev >= MIN_DEV_TRADES and n_ho >= MIN_HOLDOUT_TRADES and total >= MIN_TOTAL_TRADES)
+              else "FAIL",
+              f"{n_dev} dev, {n_ho} hold-out, {total} total")
 
     years = pd.concat([dev["by_year"], ho["by_year"]])
     years = years[years["trades"] > 0]

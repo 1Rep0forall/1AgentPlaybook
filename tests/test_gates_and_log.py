@@ -40,7 +40,16 @@ def test_dev_only_fail_stops_before_holdout(tmp_path):
     dev = fake_run(tmp_path, "d", "dev", 80, -1.0, 0.9, -3.0, -1.0, [(2016, 80, -80)])
     r = gt.evaluate(dev)
     assert r["verdict"].startswith("DEV FAIL") and "do not run the hold-out" in r["verdict"]
-    assert any("not for dev alone" in n for n in r["notes"])
+    g4 = next(g for g in r["gates"] if g["gate"] == 4)
+    assert g4["status"] == "PASS" and "80 trades" in g4["detail"]          # 80 >= 70 dev minimum
+
+
+def test_dev_below_70_trades_is_inconclusive_even_if_gates_fail(tmp_path):
+    assert gt.MIN_DEV_TRADES == 70
+    few = fake_run(tmp_path, "d", "dev", 69, -1.0, 0.9, -3.0, -1.0, [(2016, 69, -69)])
+    assert gt.evaluate(few)["verdict"].startswith("DEV INCONCLUSIVE")      # gate 4 is checked first
+    ok = fake_run(tmp_path, "d70", "dev", 70, 3.0, 1.5, 0.5, 2.5, [(2016, 70, 210)])
+    assert gt.evaluate(ok)["verdict"].startswith("DEV GATES 1–3 PASS")
 
 
 def test_dev_pass_allows_holdout(tmp_path):
@@ -56,6 +65,9 @@ def test_final_pass_inconclusive_and_fail(tmp_path):
     assert r["verdict"].startswith("PASS on gates 1–6") and "gate 7" in r["verdict"]
     few = fake_run(tmp_path, "h2", "holdout", 12, 3.0, 1.5, 0.5, 2.5, [(2022, 12, 36.0)], pnl=good_pnl(12))
     assert gt.evaluate(dev, few)["verdict"].startswith("INCONCLUSIVE — too few trades")
+    thin_dev = fake_run(tmp_path, "d3", "dev", 60, 3.0, 1.5, 0.5, 2.5, yrs, pnl=good_pnl(60))
+    big_ho = fake_run(tmp_path, "h4", "holdout", 60, 3.0, 1.5, 0.5, 2.5, [(2022, 60, 180.0)], pnl=good_pnl(60))
+    assert gt.evaluate(thin_dev, big_ho)["verdict"].startswith("INCONCLUSIVE — too few trades")   # 120 total, dev < 70
     bad = fake_run(tmp_path, "h3", "holdout", 40, -1.0, 0.8, -2.0, -1.0, [(2022, 40, -40.0)], pnl=[-1.0] * 40)
     assert gt.evaluate(dev, bad)["verdict"].startswith("FAIL")
     lumpy = fake_run(tmp_path, "d2", "dev", 140, 3.0, 1.5, 0.5, 2.5, [(2015, 140, 420.0)] + [(y, 1, -1.0) for y in range(2016, 2022)],
@@ -74,6 +86,7 @@ def test_dirty_runs_and_wrong_periods_are_flagged(tmp_path):
 def test_gate_thresholds_match_blueprint():
     text = (ROOT / "playbook" / "Backtest_Blueprint.md").read_text()
     for needle in (f"≥ {gt.MIN_TOTAL_TRADES} in total", f"≥ {gt.MIN_HOLDOUT_TRADES} in the hold-out",
+                   f"≥ {gt.MIN_DEV_TRADES} in dev", f"fewer than {gt.MIN_DEV_TRADES} dev trades",
                    f"profit factor ≥ {gt.MIN_PROFIT_FACTOR}", f"> {gt.MAX_YEAR_SHARE:.0%} of net profit",
                    f"≥ {gt.MIN_NONNEG_YEAR_SHARE:.0%} of years",
                    f"< ${CFG.starting_capital * gt.MAX_MC_P95_DD_FRACTION:g}"):
@@ -91,8 +104,15 @@ def test_gates_on_a_real_engine_run(tmp_path):
     pd.DataFrame(rows, columns=["timestamp", "open", "high", "low", "close"]).to_csv(p, index=False)
     out = ob.main(["--period", "dev", "--data", str(p), "--out", str(tmp_path / "res")])
     r = gt.evaluate(out)
-    assert r["mode"] == "dev" and {g["gate"] for g in r["gates"]} == {1, 2, 3, 7}
+    assert r["mode"] == "dev" and {g["gate"] for g in r["gates"]} == {1, 2, 3, 4, 7}
     assert gt.list_runs(tmp_path / "res")[0]["period"] == "dev"
+
+
+def test_dev_minimum_is_recorded_in_decisions_and_registry():
+    d5 = (ROOT / "toolbox" / "pre_run_decisions.md").read_text()
+    notes = (ROOT / "toolbox" / "backtest_notes.md").read_text()
+    assert f"≥ {gt.MIN_DEV_TRADES} trades in dev" in d5
+    assert f"≥ {gt.MIN_DEV_TRADES} dev, ≥ {gt.MIN_HOLDOUT_TRADES} hold-out and ≥ {gt.MIN_TOTAL_TRADES} total" in notes
 
 
 # ------------------------------------------------------------------ session log

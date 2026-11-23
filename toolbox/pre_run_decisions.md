@@ -11,7 +11,7 @@ real results = a new version (playbook §5).
 | D2 | **Time exit** | **12:00 ET** hard flatten. | `exit_time: "12:00"` | ✔ final |
 | D3 | **Entry order** | Risk-capped limit with attached stop. | playbook §2.1 | ✔ final |
 | D4 | **Costs** | **$1.00 per side ($2.00 round turn) — PLACEHOLDER** until the exact broker all-in fee schedule (commission + exchange + NFA) is confirmed. | `commission_per_side_usd: 1.00` | ⚠ placeholder — see rule below |
-| D5 | **Minimum trades** | **≥ 30 trades in the hold-out (2022→) and ≥ 100 overall**; otherwise the verdict is **INCONCLUSIVE**. | Blueprint §4 gate 4 | ✔ final |
+| D5 | **Minimum trades** | **≥ 70 trades in dev (2015–2021), ≥ 30 in the hold-out (2022→) and ≥ 100 overall**; otherwise the verdict is **INCONCLUSIVE**. The dev minimum was added 2026-11-23, still before any real data. | Blueprint §4 gate 4, `backtest/gates.py` | ✔ final |
 | D6 | **Drawdown stop** | **$150** fixed (pause at $100), decided before seeing any real results. | `drawdown_pause_usd: 100.0`, `drawdown_stop_usd: 150.0` | ✔ final |
 | D7 | **Paper-trading length** | **Both** ≥ 40 paper sessions **and** ≥ 15 paper trades before live is even considered. | playbook §6 item 2 | ✔ final |
 | D8 | **Data spec** | Pending, see the table below. | `backtest_notes.md` pre-registration + CLI flags | ⏳ fill before the first real-data run |

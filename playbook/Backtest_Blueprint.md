@@ -73,7 +73,7 @@ run is refused unless the git worktree is clean.
 1. **Dev run** → work through the Proof checklist (playbook §4.2) and read the result against gates 1–3 and 5 for the dev period.
    - Data or code problem found → fix it (bug fixes need a failing test first), commit, re-run **dev**. Repeat as needed; log every run.
    - Dev result **FAIL** on gates 1–3 → **stop here. Do not run the hold-out.** v1.1 is rejected. The hold-out stays unused for a future version.
-   - Dev result **INCONCLUSIVE** (too few trades) → you may still run the hold-out, but expect INCONCLUSIVE overall.
+   - Dev result **INCONCLUSIVE** (fewer than 70 dev trades) → you may still run the hold-out, but expect INCONCLUSIVE overall.
    - Dev result passes → tag the commit, then run the hold-out once.
 2. **Hold-out run** → record it in `backtest_notes.md` immediately, before interpreting it.
    - **PASS** on all gates → move to paper trading (playbook §6).
@@ -140,7 +140,7 @@ Check gate 4 first: if there are too few trades, the verdict is **INCONCLUSIVE**
 
 | # | Gate | Applies to |
 |---|---|---|
-| 4 | Enough trades (D5): ≥ 100 in total **and** ≥ 30 in the hold-out. Otherwise → INCONCLUSIVE. | each period |
+| 4 | Enough trades (D5): ≥ 70 in dev **and** ≥ 30 in the hold-out **and** ≥ 100 in total. Otherwise → INCONCLUSIVE. | each period |
 | 1 | Expectancy > 0 after base costs **and** profit factor ≥ 1.15 | dev and hold-out separately |
 | 2 | `costs_x2_same_trades` expectancy ≥ 0 | each period |
 | 3 | The sign of expectancy is the same under `ambiguous_target_first` | each period |

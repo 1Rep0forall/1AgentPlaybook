@@ -8,6 +8,18 @@ Breakout on Micro E-mini S&P 500 futures (MES), built on the
 > far used synthetic random-walk data to check the code. This is a research framework, not
 > financial advice. Futures are leveraged; losses can exceed planned stops.
 
+## Get started (on your computer, Python 3.10+)
+macOS / Linux:
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m pytest tests/ -q
+python gui/server.py --open
+```
+Windows (PowerShell): use `py -m venv .venv` then `.venv\Scripts\Activate.ps1`; the other three commands are the same.
+
+**Launch the dashboard:** `python gui/server.py --open` → http://127.0.0.1:8765 (Ctrl+C to stop).
+
 | Part | Path |
 |---|---|
 | Agent instructions (daily loop, boundaries) | `CLAUDE.md` |
@@ -23,7 +35,7 @@ Breakout on Micro E-mini S&P 500 futures (MES), built on the
 | Local dashboard (GUI) | `gui/server.py`, `gui/index.html` |
 | Local API-key storage + connection test | `backtest/credentials.py` |
 | Synthetic smoke-test data | `backtest/make_synthetic_data.py` |
-| Tests (logic + docs/config consistency) | `tests/test_orb_backtest.py` |
+| Tests (logic, governance, GUI, docs/config consistency) | `tests/` |
 
 ## Dashboard (one command)
 ```bash

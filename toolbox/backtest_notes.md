@@ -12,9 +12,9 @@ the best one.
 - Roll rule: ____ (e.g. roll when next contract's daily volume > front; unadjusted prices)
 - Development (in-sample) period: 2015-01-01 → 2021-12-31
 - Hold-out (out-of-sample) period: 2022-01-01 → latest — **run once, after rules are frozen**
-- Pass/fail gates (Blueprint §4): trades ≥ 100 total and ≥ 30 hold-out (else INCONCLUSIVE); expectancy > 0 and PF ≥ 1.15 in dev and hold-out; `costs_x2_same_trades` expectancy ≥ 0; same expectancy sign under `ambiguous_target_first`; no year > 50% of net profit and ≥ 60% of traded years non-negative; Monte Carlo p95 max DD < $250 (skipped → INCONCLUSIVE); hand-check of 10 trades + 5 no-trade days
+- Pass/fail gates (Blueprint §4): trades ≥ 70 dev, ≥ 30 hold-out and ≥ 100 total (else INCONCLUSIVE); expectancy > 0 and PF ≥ 1.15 in dev and hold-out; `costs_x2_same_trades` expectancy ≥ 0; same expectancy sign under `ambiguous_target_first`; no year > 50% of net profit and ≥ 60% of traded years non-negative; Monte Carlo p95 max DD < $250 (skipped → INCONCLUSIVE); hand-check of 10 trades + 5 no-trade days
 - Variant budget: **one** trading config (v1.1) + optionally **one** pre-registered research config (D1). Nothing else.
-- Frozen tag / commit: `v1.1-frozen` (`git rev-parse v1.1-frozen`). If the D4 fee is amended before any real-data run: `v1.1-frozen-r1` (record here)
+- Frozen tag / commit: `v1.1-frozen` on the 2026-11-23 readiness commit, the first commit containing the complete pre-registration incl. the dev ≥ 70 minimum (`git rev-parse v1.1-frozen`). A sandbox-only tag at `0d93468` was never published and is superseded. If the D4 fee is amended before any real-data run: `v1.1-frozen-r1` (record here)
 - Hold-out used? **NO** ← change to the run_id when it happens. Never again after that (Blueprint §2.3).
 
 ## Run log
@@ -34,6 +34,7 @@ INCONCLUSIVE against Blueprint §4, or "pipeline" for smoke tests.
 | Date | Type (clarification / bug fix / rule change) | What and why | Version | Test added |
 |---|---|---|---|---|
 | 2026-11-22 | rule change (pre-run) | Capped-limit entry; full OR coverage; unified reason codes | v1.1 | yes |
+| 2026-11-23 | clarification (pre-data) | Dev minimum trade count set to 70 (gate 4 now: ≥ 70 dev, ≥ 30 hold-out, ≥ 100 total); no trading rule changed | v1.1 | yes (thresholds tested against the Blueprint) |
 | 2026-11-23 | tooling (no rule change) | `session_tools.py log` + dashboard *Log a session* (validated rows, auto rule-break flags); `backtest/gates.py` + dashboard results/gates panel; requirements.txt; CI test workflow | v1.1 | yes (`tests/test_gates_and_log.py`) |
 | 2026-11-22 | tooling (no rule change) | Local dashboard `gui/server.py`; git-ignored API-key storage + honest connection test `backtest/credentials.py`; frozen rule numbers untouched | v1.1 | yes (`tests/test_gui.py`) |
 | 2026-11-22 | freeze (pre-data) | D1–D7, D9 and removals decided; D4 fee placeholder $1.00/side; D8 pending; tagged `v1.1-frozen` | v1.1 | n/a (docs consistency tests pass) |
@@ -43,7 +44,7 @@ INCONCLUSIVE against Blueprint §4, or "pipeline" for smoke tests.
 
 | Found | Item | Proposed type | Status |
 |---|---|---|---|
-| 2026-11-23 | Blueprint §2.3 says a dev run can be "INCONCLUSIVE (too few trades)", but §4 / D5 only set minimums for the hold-out (≥ 30) and the total (≥ 100). `gates.py` reports dev gates 1–3 and the dev trade count and does not invent a dev minimum. Decide before the first real dev run, e.g. "dev ≥ 70 so that dev + hold-out can reach 100". | clarification (pre-data) | open |
+| 2026-11-23 | Blueprint §2.3 says a dev run can be "INCONCLUSIVE (too few trades)", but §4 / D5 only set minimums for the hold-out (≥ 30) and the total (≥ 100). `gates.py` reports dev gates 1–3 and the dev trade count and does not invent a dev minimum. Decided 2026-11-23 (before any real data): **dev ≥ 70 trades**; in Blueprint §4 gate 4, D5 and `gates.py`. | clarification (pre-data) | **resolved** |
 
 ## Pause reviews (playbook §2.3)
 

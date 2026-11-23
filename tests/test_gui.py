@@ -83,6 +83,20 @@ def test_default_secrets_location_is_git_ignored():
         assert r.returncode == 0, f"{rel} is not git-ignored"
 
 
+def test_gitignore_blocks_secrets_but_keeps_proof_and_code_tracked():
+    def ignored(rel):
+        return subprocess.run(["git", "-C", str(ROOT), "check-ignore", "-q", rel]).returncode == 0
+    for rel in ("config/secrets.local.json", ".env", ".env.local", "anything.local.json", "data/es_1min.csv",
+                ".venv/bin/python"):
+        assert ignored(rel), f"{rel} should be git-ignored"
+    for rel in ("logs/trade_log_2026.csv", "logs/charts/2026-01-05.png", "results/run/summary.json",
+                "toolbox/backtest_config.json", "playbook/MES_ORB_Playbook_v1.md", "backtest/orb_backtest.py",
+                "gui/server.py", "tests/test_gui.py", "README.md", "requirements.txt"):
+        assert not ignored(rel), f"{rel} must stay tracked"
+    tracked = subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True).stdout.split()
+    assert not [f for f in tracked if f.startswith("config/") or f.startswith(".env") or f.endswith(".local.json")]
+
+
 def test_saving_inside_repo_never_changes_tracked_files(monkeypatch):
     p = ROOT / "config" / "pytest_tmp_secrets.local.json"
     monkeypatch.setenv("ORB_SECRETS_FILE", str(p))
